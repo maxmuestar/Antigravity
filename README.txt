@@ -1,0 +1,1 @@
+To start go to dist > GameLauncher-win32-x64 > GameLauncher.exe
