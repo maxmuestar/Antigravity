@@ -243,7 +243,11 @@ function setupModalActions() {
     const dropdown = document.getElementById('select-exe-dropdown');
     const selectedExe = dropdown.value;
     if (appState.pendingSelectionGameId && selectedExe) {
-      await window.api.resolveExecutableSelection(appState.pendingSelectionGameId, selectedExe);
+      const result = await window.api.resolveExecutableSelection(appState.pendingSelectionGameId, selectedExe);
+      if (!result?.success) {
+        alert(`Could not save startup file: ${result?.error || 'Unknown error'}`);
+        return;
+      }
       closeActiveModal();
       await loadLibrary();
     }
@@ -254,7 +258,11 @@ function setupModalActions() {
     const dropdown = document.getElementById('select-no-exe-dropdown');
     const selectedExe = dropdown.value;
     if (appState.pendingSelectionGameId && selectedExe && selectedExe !== '(No files extracted)') {
-      await window.api.resolveExecutableSelection(appState.pendingSelectionGameId, selectedExe);
+      const result = await window.api.resolveExecutableSelection(appState.pendingSelectionGameId, selectedExe);
+      if (!result?.success) {
+        alert(`Could not save startup file: ${result?.error || 'Unknown error'}`);
+        return;
+      }
       closeActiveModal();
       await loadLibrary();
     }

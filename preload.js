@@ -38,7 +38,7 @@ contextBridge.exposeInMainWorld('api', {
   onPromptNoExecutable: (callback) => {
     ipcRenderer.on('prompt-no-executable', (event, data) => callback(data));
   },
-  resolveExecutableSelection: (gameId, selectedExe) => ipcRenderer.invoke('resolve-executable-selection', gameId, selectedExe),
+  resolveExecutableSelection: (gameId, selectedExe) => ipcRenderer.invoke('resolve-executable-selection', { gameId, selectedExe }),
   
   // Dialog window controls
   closeApp: () => ipcRenderer.send('close-app')

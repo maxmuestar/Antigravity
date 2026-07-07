@@ -1,20 +1,12 @@
 {
   "websites": [
     {
-      "name": "PokeRogue",
-      "url": "https://pokerogue.net/"
+      "name": "SteamRip #1",
+      "url": "https://steamrip.com/"
     },
     {
-      "name": "Itch.io (Free)",
-      "url": "https://itch.io/games/free"
-    },
-    {
-      "name": "SteamUnlocked",
+      "name": "SteamUnlocked (Slow downloads)",
       "url": "https://steamunlocked.net/"
-    },
-    {
-      "name": "CrazyGames",
-      "url": "https://www.crazygames.com/"
     }
   ]
 }

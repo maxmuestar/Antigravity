@@ -454,7 +454,7 @@ function createWindow() {
     height: 800,
     minWidth: 1000,
     minHeight: 700,
-    title: 'Antigravity',
+    title: 'Game Launcher & Downloader',
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -580,9 +580,9 @@ async function processDownloadedFile(filePath, fileName, downloadId) {
     const cleanName = path.basename(fileName, ext)
       .replace(/[-_]/g, ' ')
       .replace(/\b\w/g, c => c.toUpperCase()); // Capitalize words
-
+      
     const gameFolder = path.join(gamesDir, gameId);
-
+    
     if (!fs.existsSync(gameFolder)) {
       fs.mkdirSync(gameFolder, { recursive: true });
     }
@@ -608,9 +608,9 @@ async function processDownloadedFile(filePath, fileName, downloadId) {
         mainWindow.webContents.send('extraction-failed', { title: cleanName, error: err.message });
         return;
       }
-
+      
       // Clean up archive file to save space
-      try { fs.unlinkSync(filePath); } catch (e) { }
+      try { fs.unlinkSync(filePath); } catch (e) {}
 
       // Scan extracted directory for files
       const allFiles = getFilesRecursively(gameFolder);
@@ -662,10 +662,10 @@ async function processDownloadedFile(filePath, fileName, downloadId) {
       // Standalone file downloaded (e.g. standalone .exe)
       const destPath = path.join(gameFolder, fileName);
       fs.copyFileSync(filePath, destPath);
-
+      
       // Clean up temporary download file
-      try { fs.unlinkSync(filePath); } catch (e) { }
-
+      try { fs.unlinkSync(filePath); } catch (e) {}
+      
       await registerGame(gameId, cleanName, gameFolder, fileName);
     }
   } catch (err) {
@@ -828,7 +828,9 @@ ipcMain.handle('run-game', (event, gameId) => {
     const game = library.find(g => g.id === gameId);
     if (!game) return { success: false, error: 'Game not found in library' };
 
-    const fullExePath = path.join(game.folderPath, game.exePath);
+    const fullExePath = path.isAbsolute(game.exePath)
+      ? game.exePath
+      : path.join(game.folderPath, game.exePath);
     if (!fs.existsSync(fullExePath)) {
       return { success: false, error: `Startup file not found: ${fullExePath}` };
     }
@@ -872,7 +874,7 @@ ipcMain.handle('delete-game', (event, gameId, deleteFiles) => {
     if (game.coverPath) {
       const decodedCoverPath = game.coverPath.replace('app-file://', '');
       if (fs.existsSync(decodedCoverPath)) {
-        try { fs.unlinkSync(decodedCoverPath); } catch (e) { }
+        try { fs.unlinkSync(decodedCoverPath); } catch (e) {}
       }
     }
 
@@ -893,16 +895,16 @@ ipcMain.handle('select-cover-image', async () => {
     ],
     properties: ['openFile']
   });
-
+  
   if (result.canceled || result.filePaths.length === 0) {
     return null;
   }
-
+  
   const srcPath = result.filePaths[0];
   const ext = path.extname(srcPath);
   const targetName = `${Date.now()}${ext}`;
   const destPath = path.join(coversDir, targetName);
-
+  
   try {
     fs.copyFileSync(srcPath, destPath);
     // Return custom protocol URL
@@ -922,18 +924,27 @@ ipcMain.handle('select-manual-exe', async () => {
       { name: 'All Files', extensions: ['*'] }
     ]
   });
-
+  
   if (result.canceled || result.filePaths.length === 0) {
     return null;
   }
-
+  
   return result.filePaths[0].replace(/\\/g, '/');
 });
 
-ipcMain.handle('resolve-executable-selection', async (event, { gameId, selectedExe }) => {
+ipcMain.handle('resolve-executable-selection', async (event, payload, legacySelectedExe) => {
+  const gameId = typeof payload === 'object' && payload !== null ? payload.gameId : payload;
+  const selectedExe = typeof payload === 'object' && payload !== null ? payload.selectedExe : legacySelectedExe;
   const pending = pendingGames[gameId];
-  if (pending) {
-    await registerGame(pending.id, pending.title, pending.folderPath, selectedExe);
+  if (pending && selectedExe) {
+    let normalizedExe = selectedExe.replace(/\\/g, '/');
+    if (path.isAbsolute(normalizedExe)) {
+      const relativeExe = path.relative(pending.folderPath, normalizedExe).replace(/\\/g, '/');
+      if (!relativeExe.startsWith('..') && !path.isAbsolute(relativeExe)) {
+        normalizedExe = relativeExe;
+      }
+    }
+    await registerGame(pending.id, pending.title, pending.folderPath, normalizedExe);
     delete pendingGames[gameId];
     return { success: true };
   }

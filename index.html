@@ -1,19 +1,22 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Game Launcher & Downloader</title>
+  <title>AntiGravity</title>
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap"
+    rel="stylesheet">
   <!-- FontAwesome Icons (loaded securely) -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
-  
+
   <div class="app-container">
     <!-- Sidebar -->
     <aside class="sidebar">
@@ -23,7 +26,7 @@
           <span>ANTIGRAVITY</span>
         </div>
       </div>
-      
+
       <nav class="nav-menu">
         <button class="nav-btn active" id="btn-library">
           <i class="fa-solid fa-layer-group"></i>
@@ -34,16 +37,16 @@
           <span>Add Website</span>
         </button>
       </nav>
-      
+
       <div class="sidebar-section-title">
         <span>WEBSITES</span>
       </div>
-      
+
       <!-- Configured websites container -->
       <div class="websites-list" id="websites-container">
         <!-- Rendered dynamically -->
       </div>
-      
+
       <!-- Active Downloads Panel -->
       <div class="downloads-panel" id="downloads-panel" style="display: none;">
         <div class="downloads-header">
@@ -55,10 +58,10 @@
         </div>
       </div>
     </aside>
-    
+
     <!-- Main Content Area -->
     <main class="main-content">
-      
+
       <!-- Library View -->
       <section class="content-tab active" id="tab-library">
         <div class="view-header">
@@ -67,12 +70,12 @@
             <p class="subtitle">Launch, manage, and play your downloaded games.</p>
           </div>
         </div>
-        
+
         <!-- Games Grid -->
         <div class="games-grid" id="games-grid">
           <!-- Rendered dynamically -->
         </div>
-        
+
         <!-- Empty State -->
         <div class="empty-state" id="library-empty" style="display: none;">
           <div class="empty-icon-wrap">
@@ -82,14 +85,14 @@
           <p>Choose a website from the sidebar to browse, download, and launch games!</p>
         </div>
       </section>
-      
+
       <!-- Websites Manager View (Add/Edit) -->
       <section class="content-tab" id="tab-config">
         <div class="view-header">
           <h1>Website Settings</h1>
           <p class="subtitle">Add or edit websites that appear in your launcher's browser.</p>
         </div>
-        
+
         <div class="config-card">
           <h3>Add New Website</h3>
           <form class="config-form" id="add-website-form">
@@ -106,7 +109,7 @@
             </button>
           </form>
         </div>
-        
+
         <div class="config-card" style="margin-top: 2rem;">
           <h3>Manage Websites</h3>
           <div class="manage-sites-list" id="manage-sites-list">
@@ -114,7 +117,7 @@
           </div>
         </div>
       </section>
-      
+
       <!-- In-App Browser View -->
       <section class="content-tab" id="tab-browser">
         <div class="browser-toolbar">
@@ -138,16 +141,18 @@
           </button>
         </div>
         <div class="webview-container">
-          <webview id="game-webview" src="about:blank" allowpopups useragent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"></webview>
+          <webview id="game-webview" src="about:blank" allowpopups
+            useragent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36">
+          </webview>
         </div>
       </section>
-      
+
     </main>
   </div>
-  
+
   <!-- MODALS OVERLAY -->
   <div class="modal-overlay" id="modal-overlay">
-    
+
     <!-- Modal: Download Completed Dialog -->
     <div class="modal-content" id="modal-download-done">
       <div class="modal-header">
@@ -157,7 +162,8 @@
         </div>
       </div>
       <div class="modal-body">
-        <p>Your download <strong id="completed-game-name">Game</strong> has finished successfully and is now extracting/ready.</p>
+        <p>Your download <strong id="completed-game-name">Game</strong> has finished successfully and is now
+          extracting/ready.</p>
         <p>Would you like to keep downloading other games, or close the launcher application?</p>
       </div>
       <div class="modal-footer">
@@ -165,7 +171,7 @@
         <button class="primary-btn danger-hover" id="modal-btn-close-app">Close Launcher</button>
       </div>
     </div>
-    
+
     <!-- Modal: Select Startup Executable (Multiple found) -->
     <div class="modal-content" id="modal-select-exe">
       <div class="modal-header">
@@ -175,7 +181,8 @@
         </div>
       </div>
       <div class="modal-body">
-        <p>Multiple executables were found in the extracted files for <strong class="game-target-title">Game</strong>.</p>
+        <p>Multiple executables were found in the extracted files for <strong class="game-target-title">Game</strong>.
+        </p>
         <p>Please select which one is the main game startup executable:</p>
         <div class="form-group select-wrapper">
           <select id="select-exe-dropdown" class="modal-select">
@@ -187,7 +194,7 @@
         <button class="primary-btn" id="modal-btn-confirm-exe">Set Startup File</button>
       </div>
     </div>
-    
+
     <!-- Modal: Select Startup File (No exe found) -->
     <div class="modal-content" id="modal-no-exe">
       <div class="modal-header">
@@ -215,7 +222,7 @@
         <button class="primary-btn" id="modal-btn-confirm-no-exe">Confirm File</button>
       </div>
     </div>
-    
+
     <!-- Modal: Edit Game Info -->
     <div class="modal-content" id="modal-edit-game">
       <div class="modal-header">
@@ -232,7 +239,7 @@
             <i class="fa-solid fa-upload"></i> Upload Cover
           </button>
         </div>
-        
+
         <form class="edit-game-form" id="edit-game-form">
           <input type="hidden" id="edit-game-id">
           <div class="form-group">
@@ -255,7 +262,7 @@
         <button class="primary-btn" id="edit-btn-save">Save Changes</button>
       </div>
     </div>
-    
+
     <!-- Modal: Delete Game Confirmation -->
     <div class="modal-content" id="modal-delete-confirm">
       <div class="modal-header">
@@ -277,9 +284,10 @@
         <button class="primary-btn danger-btn" id="modal-btn-confirm-delete">Remove Game</button>
       </div>
     </div>
-    
+
   </div>
 
   <script src="renderer.js"></script>
 </body>
+
 </html>
