@@ -10,6 +10,14 @@ contextBridge.exposeInMainWorld('api', {
   saveLibrary: (games) => ipcRenderer.invoke('save-library', games),
   getStorageInfo: () => ipcRenderer.invoke('get-storage-info'),
   runGame: (gameId) => ipcRenderer.invoke('run-game', gameId),
+  getGameLaunchStatus: (gameId) => ipcRenderer.invoke('get-game-launch-status', gameId),
+  openSteam: () => ipcRenderer.invoke('open-steam'),
+  openWindowsSecurity: () => ipcRenderer.invoke('open-windows-security'),
+  openGameFolder: (gameId) => ipcRenderer.invoke('open-game-folder', gameId),
+  openStorageFolder: (folderName) => ipcRenderer.invoke('open-storage-folder', folderName),
+  createGameShortcut: (gameId) => ipcRenderer.invoke('create-game-shortcut', gameId),
+  setWindowFullscreen: (fullscreen) => ipcRenderer.invoke('set-window-fullscreen', fullscreen),
+  isWindowFullscreen: () => ipcRenderer.invoke('is-window-fullscreen'),
   deleteGame: (gameId, deleteFiles) => ipcRenderer.invoke('delete-game', gameId, deleteFiles),
   selectCoverImage: () => ipcRenderer.invoke('select-cover-image'),
   selectManualExe: () => ipcRenderer.invoke('select-manual-exe'),
@@ -31,6 +39,9 @@ contextBridge.exposeInMainWorld('api', {
   },
   onLibraryUpdated: (callback) => {
     ipcRenderer.on('library-updated', () => callback());
+  },
+  onLaunchGameRequested: (callback) => {
+    ipcRenderer.on('launch-game-requested', (event, gameId) => callback(gameId));
   },
   onPromptExecutables: (callback) => {
     ipcRenderer.on('prompt-executables', (event, data) => callback(data));

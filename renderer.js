@@ -4,8 +4,16 @@ let appState = {
   websites: [],
   library: [],
   activeDownloads: {},
-  pendingSelectionGameId: null
+  pendingSelectionGameId: null,
+  pendingLaunchGameId: null,
+  bigPictureActive: false,
+  bigPictureSelectedIndex: 0,
+  bigPictureControllerFrame: null,
+  lastControllerInputAt: 0
 };
+
+const controllerRepeatMs = 220;
+const controllerAxisThreshold = 0.55;
 
 // Elements
 const webview = document.getElementById('game-webview');
@@ -16,6 +24,11 @@ const libraryEmpty = document.getElementById('library-empty');
 const downloadsPanel = document.getElementById('downloads-panel');
 const downloadsList = document.getElementById('downloads-list');
 const downloadCountBadge = document.getElementById('download-count');
+const bigPictureOverlay = document.getElementById('big-picture-overlay');
+const bigPictureRail = document.getElementById('big-picture-rail');
+const bigPictureCover = document.getElementById('big-picture-cover');
+const bigPictureTitle = document.getElementById('big-picture-title');
+const bigPicturePath = document.getElementById('big-picture-path');
 
 // Modal Elements
 const modalOverlay = document.getElementById('modal-overlay');
@@ -24,10 +37,16 @@ const modalSelectExe = document.getElementById('modal-select-exe');
 const modalNoExe = document.getElementById('modal-no-exe');
 const modalEditGame = document.getElementById('modal-edit-game');
 const modalDeleteConfirm = document.getElementById('modal-delete-confirm');
+const modalSteamWarning = document.getElementById('modal-steam-warning');
+const modalAntivirusReminder = document.getElementById('modal-antivirus-reminder');
 
 // Tab buttons
 const btnLibrary = document.getElementById('btn-library');
 const btnConfig = document.getElementById('btn-config');
+
+window.api.onLaunchGameRequested((gameId) => {
+  launchGameWithSteamCheck(gameId);
+});
 
 // Initialize App
 document.addEventListener('DOMContentLoaded', async () => {
@@ -38,9 +57,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Attach general listeners
   setupTabNavigation();
   setupBrowserControls();
+  setupLibraryActions();
+  setupBigPictureControls();
   setupDownloadIPC();
   setupConfigForm();
   setupModalActions();
+  await showAntivirusReminder();
 });
 
 // Load Websites
@@ -84,6 +106,94 @@ function switchTab(tabId) {
   // Switch content panel
   document.querySelectorAll('.content-tab').forEach(tab => tab.classList.remove('active'));
   document.getElementById(`tab-${tabId}`).classList.add('active');
+}
+
+function setupLibraryActions() {
+  document.getElementById('btn-open-games-folder').addEventListener('click', async () => {
+    const res = await window.api.openStorageFolder('games');
+    if (!res.success) {
+      alert(`Could not open games folder: ${res.error}`);
+    }
+  });
+
+  document.getElementById('btn-open-downloads-folder').addEventListener('click', async () => {
+    const res = await window.api.openStorageFolder('downloads');
+    if (!res.success) {
+      alert(`Could not open downloads folder: ${res.error}`);
+    }
+  });
+
+  document.getElementById('btn-big-picture').addEventListener('click', () => {
+    openBigPicture();
+  });
+}
+
+function setupBigPictureControls() {
+  document.getElementById('big-picture-close').addEventListener('click', () => {
+    closeBigPicture();
+  });
+
+  document.getElementById('big-picture-fullscreen').addEventListener('click', async () => {
+    await toggleBigPictureFullscreen();
+  });
+
+  document.getElementById('big-picture-play').addEventListener('click', () => {
+    launchSelectedBigPictureGame();
+  });
+
+  document.getElementById('big-picture-folder').addEventListener('click', async () => {
+    await openSelectedBigPictureFolder();
+  });
+
+  document.getElementById('big-picture-shortcut').addEventListener('click', async () => {
+    await createSelectedBigPictureShortcut();
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (!appState.bigPictureActive) return;
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeBigPicture();
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      selectBigPictureGame(appState.bigPictureSelectedIndex + 1);
+    } else if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      selectBigPictureGame(appState.bigPictureSelectedIndex - 1);
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      launchSelectedBigPictureGame();
+    }
+  });
+}
+
+async function showAntivirusReminder() {
+  const storageInfo = await window.api.getStorageInfo();
+  document.getElementById('antivirus-data-path').innerText = storageInfo.dataDir || 'Data folder not found';
+  showModal(modalAntivirusReminder);
+}
+
+async function openSteamAndContinuePendingLaunch() {
+  const gameId = appState.pendingLaunchGameId;
+  if (!gameId) return;
+
+  const steamResult = await window.api.openSteam();
+  if (!steamResult.success) {
+    alert(`Could not open Steam: ${steamResult.error}`);
+    return;
+  }
+
+  closeActiveModal();
+  setTimeout(() => launchGame(gameId), 2500);
+}
+
+async function continuePendingLaunchAnyway() {
+  const gameId = appState.pendingLaunchGameId;
+  if (!gameId) return;
+
+  closeActiveModal();
+  await launchGame(gameId);
 }
 
 // Browser Navigation and setup
@@ -301,6 +411,16 @@ function setupModalActions() {
       preview.dataset.coverPath = coverPath;
     }
   });
+
+  document.getElementById('edit-btn-open-folder').addEventListener('click', async () => {
+    const gameId = document.getElementById('edit-game-id').value;
+    if (!gameId) return;
+
+    const res = await window.api.openGameFolder(gameId);
+    if (!res.success) {
+      alert(`Could not open folder: ${res.error}`);
+    }
+  });
   
   // Edit modal manual exe selector
   document.getElementById('edit-btn-browse-exe-path').addEventListener('click', async () => {
@@ -338,6 +458,26 @@ function setupModalActions() {
       await loadLibrary();
     }
   });
+
+  document.getElementById('modal-btn-open-steam').addEventListener('click', openSteamAndContinuePendingLaunch);
+  document.getElementById('modal-btn-launch-anyway').addEventListener('click', continuePendingLaunchAnyway);
+
+  document.getElementById('modal-btn-open-data-folder').addEventListener('click', async () => {
+    const res = await window.api.openStorageFolder('data');
+    if (!res.success) {
+      alert(`Could not open data folder: ${res.error}`);
+    }
+  });
+
+  document.getElementById('modal-btn-open-security').addEventListener('click', async () => {
+    const res = await window.api.openWindowsSecurity();
+    if (!res.success) {
+      alert(`Could not open Windows Security: ${res.error}`);
+    }
+  });
+
+  document.getElementById('modal-btn-ok-antivirus').addEventListener('click', closeActiveModal);
+  document.getElementById('modal-btn-close-antivirus').addEventListener('click', closeActiveModal);
 }
 
 // Download IPC Event Hooks
@@ -402,6 +542,7 @@ function setupDownloadIPC() {
   window.api.onLibraryUpdated(() => {
     loadLibrary();
   });
+
 }
 
 // Render downloads list
@@ -454,26 +595,302 @@ function renderDownloads() {
   });
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+async function launchGame(gameId) {
+  const res = await window.api.runGame(gameId);
+  if (!res.success) {
+    alert(`Error starting game: ${res.error}`);
+  }
+}
+
+async function launchGameWithSteamCheck(gameId) {
+  const status = await window.api.getGameLaunchStatus(gameId);
+  if (!status.success) {
+    alert(`Error starting game: ${status.error}`);
+    return;
+  }
+
+  if (!status.steamRunning) {
+    appState.pendingLaunchGameId = gameId;
+    document.getElementById('steam-warning-game-title').innerText = status.gameTitle || 'This game';
+    showModal(modalSteamWarning);
+    return;
+  }
+
+  await launchGame(gameId);
+}
+
+function getCoverUrl(game) {
+  return game.coverPath
+    ? game.coverPath.replace('app-file://', 'app-file:///')
+    : '';
+}
+
+function getSelectedBigPictureGame() {
+  return appState.library[appState.bigPictureSelectedIndex] || null;
+}
+
+async function enterBigPictureFullscreen() {
+  const result = await window.api.setWindowFullscreen(true);
+  if (!result?.success) {
+    console.warn('Could not enter fullscreen:', result?.error);
+  }
+}
+
+async function exitBigPictureFullscreen() {
+  const result = await window.api.setWindowFullscreen(false);
+  if (!result?.success) {
+    console.warn('Could not exit fullscreen:', result?.error);
+  }
+}
+
+async function toggleBigPictureFullscreen() {
+  const isFullscreen = await window.api.isWindowFullscreen();
+  const result = await window.api.setWindowFullscreen(!isFullscreen);
+  if (!result?.success) {
+    console.warn('Could not toggle fullscreen:', result?.error);
+  }
+}
+
+async function openBigPicture() {
+  appState.bigPictureActive = true;
+  appState.bigPictureSelectedIndex = Math.min(
+    appState.bigPictureSelectedIndex,
+    Math.max(appState.library.length - 1, 0)
+  );
+  bigPictureOverlay.classList.add('active');
+  bigPictureOverlay.setAttribute('aria-hidden', 'false');
+  document.body.classList.add('big-picture-open');
+  renderBigPicture();
+  startBigPictureControllerSupport();
+  await enterBigPictureFullscreen();
+}
+
+async function closeBigPicture() {
+  appState.bigPictureActive = false;
+  stopBigPictureControllerSupport();
+  bigPictureOverlay.classList.remove('active');
+  bigPictureOverlay.setAttribute('aria-hidden', 'true');
+  document.body.classList.remove('big-picture-open');
+
+  if (document.fullscreenElement === bigPictureOverlay) {
+    document.exitFullscreen().catch(() => {});
+  }
+
+  await exitBigPictureFullscreen();
+}
+
+function selectBigPictureGame(index) {
+  if (appState.library.length === 0) return;
+
+  const lastIndex = appState.library.length - 1;
+  if (index < 0) {
+    appState.bigPictureSelectedIndex = lastIndex;
+  } else if (index > lastIndex) {
+    appState.bigPictureSelectedIndex = 0;
+  } else {
+    appState.bigPictureSelectedIndex = index;
+  }
+
+  renderBigPictureSelection();
+}
+
+function renderBigPicture() {
+  bigPictureRail.innerHTML = '';
+
+  if (appState.library.length === 0) {
+    bigPictureTitle.innerText = 'No games yet';
+    bigPicturePath.innerText = 'Download or add a game first.';
+    bigPictureCover.style.backgroundImage = 'none';
+    bigPictureCover.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i>';
+    return;
+  }
+
+  appState.library.forEach((game, index) => {
+    const item = document.createElement('button');
+    item.className = 'big-picture-game';
+    item.dataset.index = index;
+
+    const coverUrl = getCoverUrl(game);
+    item.innerHTML = coverUrl
+      ? `<img src="${escapeHtml(coverUrl)}" alt="${escapeHtml(game.title)}"><span>${escapeHtml(game.title)}</span>`
+      : `<div class="big-picture-game-placeholder"><i class="fa-solid fa-gamepad"></i></div><span>${escapeHtml(game.title)}</span>`;
+
+    item.addEventListener('click', () => {
+      selectBigPictureGame(index);
+    });
+
+    item.addEventListener('dblclick', () => {
+      launchSelectedBigPictureGame();
+    });
+
+    bigPictureRail.appendChild(item);
+  });
+
+  renderBigPictureSelection();
+}
+
+function renderBigPictureSelection() {
+  const game = getSelectedBigPictureGame();
+  if (!game) return;
+
+  const coverUrl = getCoverUrl(game);
+  bigPictureTitle.innerText = game.title;
+  bigPicturePath.innerText = game.exePath || 'No startup path selected';
+  bigPictureCover.style.backgroundImage = coverUrl ? `url("${coverUrl}")` : 'none';
+  bigPictureCover.innerHTML = coverUrl ? '' : '<i class="fa-solid fa-gamepad"></i>';
+
+  document.querySelectorAll('.big-picture-game').forEach((item) => {
+    const isSelected = Number(item.dataset.index) === appState.bigPictureSelectedIndex;
+    item.classList.toggle('selected', isSelected);
+    if (isSelected) {
+      item.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    }
+  });
+}
+
+async function launchSelectedBigPictureGame() {
+  const game = getSelectedBigPictureGame();
+  if (!game) return;
+  await launchGameWithSteamCheck(game.id);
+}
+
+async function openSelectedBigPictureFolder() {
+  const game = getSelectedBigPictureGame();
+  if (!game) return;
+
+  const res = await window.api.openGameFolder(game.id);
+  if (!res.success) {
+    alert(`Could not open folder: ${res.error}`);
+  }
+}
+
+async function createSelectedBigPictureShortcut() {
+  const game = getSelectedBigPictureGame();
+  if (!game) return;
+
+  const res = await window.api.createGameShortcut(game.id);
+  if (res.success) {
+    alert(`Shortcut created on your desktop:\n${res.path}`);
+  } else {
+    alert(`Could not create shortcut: ${res.error}`);
+  }
+}
+
+function getFirstConnectedGamepad() {
+  const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+  return Array.from(gamepads).find(Boolean) || null;
+}
+
+function startBigPictureControllerSupport() {
+  stopBigPictureControllerSupport();
+  appState.lastControllerInputAt = 0;
+  appState.bigPictureControllerFrame = requestAnimationFrame(pollBigPictureController);
+}
+
+function stopBigPictureControllerSupport() {
+  if (appState.bigPictureControllerFrame) {
+    cancelAnimationFrame(appState.bigPictureControllerFrame);
+    appState.bigPictureControllerFrame = null;
+  }
+}
+
+function pollBigPictureController(timestamp) {
+  if (!appState.bigPictureActive) return;
+
+  const gamepad = getFirstConnectedGamepad();
+  const canHandleInput = timestamp - appState.lastControllerInputAt > controllerRepeatMs;
+
+  if (gamepad && canHandleInput) {
+    const buttons = gamepad.buttons;
+    const axisX = gamepad.axes[0] || 0;
+    let handled = false;
+
+    if (modalSteamWarning.classList.contains('active')) {
+      if (buttons[0]?.pressed) {
+        openSteamAndContinuePendingLaunch();
+        handled = true;
+      } else if (buttons[1]?.pressed) {
+        continuePendingLaunchAnyway();
+        handled = true;
+      }
+    } else if (modalAntivirusReminder.classList.contains('active')) {
+      if (buttons[0]?.pressed || buttons[1]?.pressed) {
+        closeActiveModal();
+        handled = true;
+      } else if (buttons[2]?.pressed) {
+        window.api.openStorageFolder('data');
+        handled = true;
+      } else if (buttons[3]?.pressed) {
+        window.api.openWindowsSecurity();
+        handled = true;
+      }
+    } else if (buttons[14]?.pressed || axisX < -controllerAxisThreshold) {
+      selectBigPictureGame(appState.bigPictureSelectedIndex - 1);
+      handled = true;
+    } else if (buttons[15]?.pressed || axisX > controllerAxisThreshold) {
+      selectBigPictureGame(appState.bigPictureSelectedIndex + 1);
+      handled = true;
+    } else if (buttons[0]?.pressed) {
+      launchSelectedBigPictureGame();
+      handled = true;
+    } else if (buttons[1]?.pressed) {
+      closeBigPicture();
+      handled = true;
+    } else if (buttons[2]?.pressed) {
+      openSelectedBigPictureFolder();
+      handled = true;
+    } else if (buttons[3]?.pressed) {
+      createSelectedBigPictureShortcut();
+      handled = true;
+    } else if (buttons[9]?.pressed) {
+      toggleBigPictureFullscreen();
+      handled = true;
+    }
+
+    if (handled) {
+      appState.lastControllerInputAt = timestamp;
+    }
+  }
+
+  appState.bigPictureControllerFrame = requestAnimationFrame(pollBigPictureController);
+}
+
 // Render games library list
 function renderLibrary() {
   gamesGrid.innerHTML = '';
   
   if (appState.library.length === 0) {
     libraryEmpty.style.display = 'flex';
+    if (appState.bigPictureActive) {
+      renderBigPicture();
+    }
     return;
   }
   
   libraryEmpty.style.display = 'none';
+  appState.bigPictureSelectedIndex = Math.min(appState.bigPictureSelectedIndex, appState.library.length - 1);
   
   appState.library.forEach(game => {
     const card = document.createElement('div');
     card.className = 'game-card';
+    const safeTitle = escapeHtml(game.title);
+    const safeExePath = escapeHtml(game.exePath);
+    const safeGameId = escapeHtml(game.id);
     
     // Cover rendering
     let coverHtml = `
       <div class="game-cover-placeholder">
         <i class="fa-solid fa-gamepad"></i>
-        <span>${game.title}</span>
+        <span>${safeTitle}</span>
       </div>
     `;
     
@@ -481,28 +898,39 @@ function renderLibrary() {
       // Load file using custom protocol
       // Ensure the cover path has proper app-file:// structure
       const formattedCover = game.coverPath.replace('app-file://', 'app-file:///');
-      coverHtml = `<img src="${formattedCover}" class="game-cover" alt="${game.title}">`;
+      coverHtml = `<img src="${escapeHtml(formattedCover)}" class="game-cover" alt="${safeTitle}">`;
     }
     
     card.innerHTML = `
       <div class="game-cover-container">
         ${coverHtml}
         <div class="game-actions-overlay">
-          <button class="play-btn" data-id="${game.id}">
+          <button class="play-btn" data-id="${safeGameId}">
             <i class="fa-solid fa-play"></i> PLAY
           </button>
+          <div class="cover-quick-actions">
+            <button class="quick-action-btn folder-btn" data-id="${safeGameId}" title="Open game folder">
+              <i class="fa-solid fa-folder-open"></i> Folder
+            </button>
+            <button class="quick-action-btn shortcut-btn" data-id="${safeGameId}" title="Create desktop shortcut">
+              <i class="fa-solid fa-link"></i> Shortcut
+            </button>
+          </div>
         </div>
       </div>
       <div class="game-card-info">
         <div>
-          <div class="game-title" title="${game.title}">${game.title}</div>
-          <div class="game-exe-label" title="${game.exePath}">${game.exePath}</div>
+          <div class="game-title" title="${safeTitle}">${safeTitle}</div>
+          <div class="game-exe-label" title="${safeExePath}">${safeExePath}</div>
+          <div class="game-helper-label">
+            <i class="fa-brands fa-steam"></i> Steam check before launch
+          </div>
         </div>
         <div class="action-buttons-row">
-          <button class="icon-only-btn edit-btn" data-id="${game.id}" title="Edit game details">
+          <button class="icon-only-btn edit-btn" data-id="${safeGameId}" title="Edit game details">
             <i class="fa-solid fa-pen-to-square"></i>
           </button>
-          <button class="icon-only-btn delete-btn delete-hover" data-id="${game.id}" title="Uninstall game">
+          <button class="icon-only-btn delete-btn delete-hover" data-id="${safeGameId}" title="Uninstall game">
             <i class="fa-solid fa-trash-can"></i>
           </button>
         </div>
@@ -512,9 +940,24 @@ function renderLibrary() {
     // Attach play event
     card.querySelector('.play-btn').addEventListener('click', async (e) => {
       const gId = e.currentTarget.dataset.id;
-      const res = await window.api.runGame(gId);
+      await launchGameWithSteamCheck(gId);
+    });
+
+    card.querySelector('.folder-btn').addEventListener('click', async (e) => {
+      const gId = e.currentTarget.dataset.id;
+      const res = await window.api.openGameFolder(gId);
       if (!res.success) {
-        alert(`Error starting game: ${res.error}`);
+        alert(`Could not open folder: ${res.error}`);
+      }
+    });
+
+    card.querySelector('.shortcut-btn').addEventListener('click', async (e) => {
+      const gId = e.currentTarget.dataset.id;
+      const res = await window.api.createGameShortcut(gId);
+      if (res.success) {
+        alert(`Shortcut created on your desktop:\n${res.path}`);
+      } else {
+        alert(`Could not create shortcut: ${res.error}`);
       }
     });
     
@@ -532,6 +975,10 @@ function renderLibrary() {
     
     gamesGrid.appendChild(card);
   });
+
+  if (appState.bigPictureActive) {
+    renderBigPicture();
+  }
 }
 
 // Open Edit modal

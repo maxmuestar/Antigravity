@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, session, protocol, net, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, session, protocol, net, Menu, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -11,6 +11,7 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let mainWindow;
+let pendingLaunchGameId = null;
 let appRootDir, userDataDir, downloadsDir, gamesDir, coversDir, libraryPath, configPath, storageInfoPath;
 
 // Store games that require user action to select the startup executable
@@ -20,6 +21,79 @@ const sessionsWithDownloadListener = new WeakSet();
 
 function normalizePathForStorage(filePath) {
   return filePath.replace(/\\/g, '/');
+}
+
+function getGameById(gameId) {
+  if (!fs.existsSync(libraryPath)) {
+    return { error: 'Library file not found' };
+  }
+
+  const library = JSON.parse(fs.readFileSync(libraryPath, 'utf-8'));
+  const game = library.find(g => g.id === gameId);
+  if (!game) {
+    return { error: 'Game not found in library' };
+  }
+
+  return { game };
+}
+
+function getGameStartupPath(game) {
+  return path.isAbsolute(game.exePath)
+    ? game.exePath
+    : path.join(game.folderPath, game.exePath);
+}
+
+function sanitizeShortcutName(name) {
+  return String(name || 'Game')
+    .replace(/[<>:"/\\|?*]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim() || 'Game';
+}
+
+function getLaunchGameIdFromArgv(argv) {
+  const launchArg = argv.find(arg => arg.startsWith('--launch-game='));
+  if (!launchArg) return null;
+
+  return launchArg.slice('--launch-game='.length).replace(/^"|"$/g, '');
+}
+
+function requestGameLaunchInRenderer(gameId) {
+  if (!gameId) return;
+  pendingLaunchGameId = gameId;
+
+  if (!mainWindow) return;
+
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+  mainWindow.focus();
+
+  if (mainWindow.webContents.isLoading()) {
+    mainWindow.webContents.once('did-finish-load', () => {
+      mainWindow.webContents.send('launch-game-requested', pendingLaunchGameId);
+      pendingLaunchGameId = null;
+    });
+    return;
+  }
+
+  mainWindow.webContents.send('launch-game-requested', pendingLaunchGameId);
+  pendingLaunchGameId = null;
+}
+
+function isProcessRunning(processName) {
+  if (process.platform !== 'win32') return false;
+
+  try {
+    const { execFileSync } = require('child_process');
+    const output = execFileSync('tasklist', ['/FI', `IMAGENAME eq ${processName}`, '/NH'], {
+      encoding: 'utf-8',
+      windowsHide: true
+    });
+    return output.toLowerCase().includes(processName.toLowerCase());
+  } catch (error) {
+    console.error(`Failed to check process ${processName}:`, error);
+    return false;
+  }
 }
 
 function getPortableAppRootDir() {
@@ -290,6 +364,48 @@ function cleanGameSearchName(value) {
     .trim();
 }
 
+function titleCaseGameName(value) {
+  const lowercaseWords = new Set(['a', 'an', 'and', 'at', 'by', 'for', 'from', 'in', 'of', 'on', 'or', 'the', 'to', 'with']);
+
+  return value
+    .split(' ')
+    .filter(Boolean)
+    .map((word, index) => {
+      if (/^(ii|iii|iv|v|vi|vii|viii|ix|x)$/i.test(word)) return word.toUpperCase();
+      if (/^[A-Z0-9]{2,}$/.test(word)) return word;
+
+      const lower = word.toLowerCase();
+      if (index > 0 && lowercaseWords.has(lower)) return lower;
+
+      return lower.charAt(0).toUpperCase() + lower.slice(1);
+    })
+    .join(' ');
+}
+
+function cleanGameDisplayName(value) {
+  const originalBase = path.basename(value || '', path.extname(value || ''));
+  let cleaned = originalBase
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(/\[[^\]]*(steamrip|fitgirl|dodi|gog|elamigos|repack|crack|cracked|torrent|free download)[^\]]*\]/gi, ' ')
+    .replace(/\([^)]*(steamrip|fitgirl|dodi|gog|elamigos|repack|crack|cracked|torrent|free download)[^)]*\)/gi, ' ')
+    .replace(/\{[^}]*(steamrip|fitgirl|dodi|gog|elamigos|repack|crack|cracked|torrent|free download)[^}]*\}/gi, ' ')
+    .replace(/\b(steamrip|steam rip|fitgirl|dodi|gog|elamigos|onlinefix|online fix|goldberg|rune|codex|plaza|skidrow|tenoke)\b/gi, ' ')
+    .replace(/\b(repack|preinstalled|portable|setup|installer|launcher|crack|cracked|no install|torrent|free download|download)\b/gi, ' ')
+    .replace(/\b(build|update|hotfix|patch)\s*[\w.-]+\b/gi, ' ')
+    .replace(/\b(v|ver|version)\s*[\d]+([._-]\d+)*\b/gi, ' ')
+    .replace(/\b\d+([._-]\d+){1,}\b/g, ' ')
+    .replace(/\b(x64|x86|x32|win32|win64|windows|pc|multi\d*|multi|incl|dlc|bonus|ost)\b/gi, ' ')
+    .replace(/[._]+/g, ' ')
+    .replace(/[-+]+/g, ' ')
+    .replace(/[()[\]{}]/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/^\s*[-:|]+\s*|\s*[-:|]+\s*$/g, '')
+    .trim();
+
+  cleaned = cleaned.replace(/\s+\b(20[0-3]\d|19[8-9]\d)\b\s*$/g, '').trim();
+  return titleCaseGameName(cleaned || originalBase.replace(/[-_.]+/g, ' ').trim() || 'Game');
+}
+
 function normalizeGameName(value) {
   return cleanGameSearchName(value).toLowerCase().replace(/[^a-z0-9]/g, '');
 }
@@ -388,6 +504,25 @@ function writeLibrary(library) {
   fs.writeFileSync(libraryPath, JSON.stringify(library, null, 2), 'utf-8');
 }
 
+function cleanExistingLibraryTitles() {
+  const library = readLibrary();
+  let changed = false;
+
+  const cleanedLibrary = library.map(game => {
+    const nextTitle = cleanGameDisplayName(game.title);
+    if (nextTitle && nextTitle !== game.title) {
+      changed = true;
+      return { ...game, title: nextTitle };
+    }
+
+    return game;
+  });
+
+  if (changed) {
+    writeLibrary(cleanedLibrary);
+  }
+}
+
 async function enrichMissingLibraryCovers() {
   const library = readLibrary();
   let changed = false;
@@ -432,9 +567,7 @@ function recoverUnregisteredGames() {
 
     if (!startupFile) continue;
 
-    const title = path.basename(startupFile, path.extname(startupFile))
-      .replace(/[-_]/g, ' ')
-      .replace(/\b\w/g, c => c.toUpperCase());
+    const title = cleanGameDisplayName(folderName);
 
     library.push({
       id: folderName,
@@ -468,6 +601,12 @@ function createWindow() {
   mainWindow.setMenuBarVisibility(false);
   mainWindow.setMenu(null);
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
+  mainWindow.webContents.once('did-finish-load', () => {
+    if (pendingLaunchGameId) {
+      mainWindow.webContents.send('launch-game-requested', pendingLaunchGameId);
+      pendingLaunchGameId = null;
+    }
+  });
 }
 
 // Register protocol handler for local files (covers/assets)
@@ -577,9 +716,7 @@ async function processDownloadedFile(filePath, fileName, downloadId) {
   try {
     const ext = path.extname(fileName).toLowerCase();
     const gameId = Date.now().toString();
-    const cleanName = path.basename(fileName, ext)
-      .replace(/[-_]/g, ' ')
-      .replace(/\b\w/g, c => c.toUpperCase()); // Capitalize words
+    const cleanName = cleanGameDisplayName(fileName);
       
     const gameFolder = path.join(gamesDir, gameId);
     
@@ -676,6 +813,7 @@ async function processDownloadedFile(filePath, fileName, downloadId) {
 // Add game metadata to library.json
 async function registerGame(id, title, folderPath, exePath) {
   let library = [];
+  const displayTitle = cleanGameDisplayName(title);
 
   if (fs.existsSync(libraryPath)) {
     try {
@@ -686,10 +824,10 @@ async function registerGame(id, title, folderPath, exePath) {
     }
   }
 
-  const coverPath = await findAndSaveCover(id, title, exePath);
+  const coverPath = await findAndSaveCover(id, displayTitle, exePath);
   const newGame = {
     id: id,
-    title: title,
+    title: displayTitle,
     folderPath: folderPath.replace(/\\/g, '/'),
     exePath: exePath.replace(/\\/g, '/'),
     coverPath
@@ -710,21 +848,35 @@ async function registerGame(id, title, folderPath, exePath) {
   }
 }
 
-// App Initialization
-app.whenReady().then(() => {
-  initPaths(); // Must be first: sets up all writable paths
-  Menu.setApplicationMenu(null);
-  registerAppFileProtocol();
-  createWindow();
-  setupDownloadListener();
-  enrichMissingLibraryCovers();
+const singleInstanceLock = app.requestSingleInstanceLock();
+if (!singleInstanceLock) {
+  app.quit();
+} else {
+  pendingLaunchGameId = getLaunchGameIdFromArgv(process.argv);
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
+  app.on('second-instance', (event, argv) => {
+    requestGameLaunchInRenderer(getLaunchGameIdFromArgv(argv));
   });
-});
+}
+
+if (singleInstanceLock) {
+  // App Initialization
+  app.whenReady().then(() => {
+    initPaths(); // Must be first: sets up all writable paths
+    Menu.setApplicationMenu(null);
+    registerAppFileProtocol();
+    createWindow();
+    setupDownloadListener();
+    cleanExistingLibraryTitles();
+    enrichMissingLibraryCovers();
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+      }
+    });
+  });
+}
 
 // Intercept guest webview target="_blank" AND hook into webview downloads
 app.on('web-contents-created', (event, contents) => {
@@ -820,17 +972,141 @@ ipcMain.handle('get-storage-info', () => ({
   configPath: normalizePathForStorage(configPath)
 }));
 
+ipcMain.handle('get-game-launch-status', (event, gameId) => {
+  try {
+    const { game, error } = getGameById(gameId);
+    if (error) return { success: false, error };
+
+    const fullExePath = getGameStartupPath(game);
+    if (!fs.existsSync(fullExePath)) {
+      return { success: false, error: `Startup file not found: ${fullExePath}` };
+    }
+
+    return {
+      success: true,
+      gameTitle: game.title,
+      steamRunning: isProcessRunning('steam.exe')
+    };
+  } catch (err) {
+    console.error('Failed to get launch status:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('open-steam', async () => {
+  try {
+    await shell.openExternal('steam://open/main');
+    return { success: true };
+  } catch (err) {
+    console.error('Failed to open Steam:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('open-windows-security', async () => {
+  try {
+    await shell.openExternal('windowsdefender:');
+    return { success: true };
+  } catch (err) {
+    console.error('Failed to open Windows Security:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('set-window-fullscreen', (event, fullscreen) => {
+  const targetWindow = BrowserWindow.fromWebContents(event.sender);
+  if (!targetWindow) return { success: false, error: 'Window not found' };
+
+  targetWindow.setFullScreen(Boolean(fullscreen));
+  return { success: true };
+});
+
+ipcMain.handle('is-window-fullscreen', (event) => {
+  const targetWindow = BrowserWindow.fromWebContents(event.sender);
+  return Boolean(targetWindow && targetWindow.isFullScreen());
+});
+
+ipcMain.handle('open-game-folder', async (event, gameId) => {
+  try {
+    const { game, error } = getGameById(gameId);
+    if (error) return { success: false, error };
+    if (!fs.existsSync(game.folderPath)) {
+      return { success: false, error: `Folder not found: ${game.folderPath}` };
+    }
+
+    const result = await shell.openPath(game.folderPath);
+    return result ? { success: false, error: result } : { success: true };
+  } catch (err) {
+    console.error('Failed to open game folder:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('open-storage-folder', async (event, folderName) => {
+  const folders = {
+    downloads: downloadsDir,
+    games: gamesDir,
+    covers: coversDir,
+    data: userDataDir
+  };
+  const targetFolder = folders[folderName];
+
+  if (!targetFolder) {
+    return { success: false, error: 'Unknown folder' };
+  }
+
+  try {
+    fs.mkdirSync(targetFolder, { recursive: true });
+    const result = await shell.openPath(targetFolder);
+    return result ? { success: false, error: result } : { success: true };
+  } catch (err) {
+    console.error('Failed to open storage folder:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('create-game-shortcut', (event, gameId) => {
+  try {
+    const { game, error } = getGameById(gameId);
+    if (error) return { success: false, error };
+
+    const fullExePath = getGameStartupPath(game);
+    if (!fs.existsSync(fullExePath)) {
+      return { success: false, error: `Startup file not found: ${fullExePath}` };
+    }
+
+    const shortcutPath = path.join(app.getPath('desktop'), `${sanitizeShortcutName(game.title)}.lnk`);
+    const escapedGameId = String(game.id).replace(/"/g, '\\"');
+    const launcherTarget = process.execPath;
+    const launcherArgs = app.isPackaged
+      ? `--launch-game="${escapedGameId}"`
+      : `"${app.getAppPath()}" --launch-game="${escapedGameId}"`;
+    const created = shell.writeShortcutLink(shortcutPath, 'create', {
+      target: launcherTarget,
+      args: launcherArgs,
+      cwd: app.isPackaged ? path.dirname(process.execPath) : app.getAppPath(),
+      icon: fullExePath,
+      iconIndex: 0,
+      description: `Launch ${game.title}`
+    });
+
+    return created
+      ? { success: true, path: normalizePathForStorage(shortcutPath) }
+      : { success: false, error: 'Windows could not create the shortcut' };
+  } catch (err) {
+    console.error('Failed to create game shortcut:', err);
+    return { success: false, error: err.message };
+  }
+});
+
 ipcMain.handle('run-game', (event, gameId) => {
   if (!fs.existsSync(libraryPath)) return { success: false, error: 'Library file not found' };
 
   try {
-    const library = JSON.parse(fs.readFileSync(libraryPath, 'utf-8'));
-    const game = library.find(g => g.id === gameId);
-    if (!game) return { success: false, error: 'Game not found in library' };
+    const { game, error } = getGameById(gameId);
+    if (error) return { success: false, error };
 
-    const fullExePath = path.isAbsolute(game.exePath)
-      ? game.exePath
-      : path.join(game.folderPath, game.exePath);
+    const fullExePath = getGameStartupPath(game);
     if (!fs.existsSync(fullExePath)) {
       return { success: false, error: `Startup file not found: ${fullExePath}` };
     }

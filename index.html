@@ -69,6 +69,17 @@
             <h1>Game Library</h1>
             <p class="subtitle">Launch, manage, and play your downloaded games.</p>
           </div>
+          <div class="view-header-actions">
+            <button class="secondary-btn btn-sm" id="btn-open-games-folder">
+              <i class="fa-solid fa-folder-open"></i> Games Folder
+            </button>
+            <button class="secondary-btn btn-sm" id="btn-open-downloads-folder">
+              <i class="fa-solid fa-download"></i> Downloads
+            </button>
+            <button class="primary-btn btn-sm" id="btn-big-picture">
+              <i class="fa-solid fa-tv"></i> Big Picture
+            </button>
+          </div>
         </div>
 
         <!-- Games Grid -->
@@ -238,6 +249,9 @@
           <button class="secondary-btn btn-sm" id="edit-btn-change-cover">
             <i class="fa-solid fa-upload"></i> Upload Cover
           </button>
+          <button class="secondary-btn btn-sm" id="edit-btn-open-folder">
+            <i class="fa-solid fa-folder-open"></i> Open Folder
+          </button>
         </div>
 
         <form class="edit-game-form" id="edit-game-form">
@@ -285,6 +299,107 @@
       </div>
     </div>
 
+    <!-- Modal: Steam Warning -->
+    <div class="modal-content" id="modal-steam-warning">
+      <div class="modal-header">
+        <div class="modal-title-with-icon text-warning">
+          <i class="fa-brands fa-steam"></i>
+          <h2>Steam is not open</h2>
+        </div>
+        <button class="modal-close-btn" onclick="closeActiveModal()"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <p><strong id="steam-warning-game-title">This game</strong> might not work correctly while Steam is closed.</p>
+        <p>Open Steam first, or continue launching the game anyway.</p>
+        <p class="controller-hint">Controller: A = Steam openen, B = Toch doorgaan</p>
+      </div>
+      <div class="modal-footer">
+        <button class="secondary-btn" id="modal-btn-launch-anyway">Toch doorgaan</button>
+        <button class="primary-btn" id="modal-btn-open-steam">
+          <i class="fa-brands fa-steam"></i> Steam openen
+        </button>
+      </div>
+    </div>
+
+    <!-- Modal: Data Folder Antivirus Reminder -->
+    <div class="modal-content" id="modal-antivirus-reminder">
+      <div class="modal-header">
+        <div class="modal-title-with-icon text-warning">
+          <i class="fa-solid fa-shield-halved"></i>
+          <h2>Check Data Folder</h2>
+        </div>
+        <button class="modal-close-btn" id="modal-btn-close-antivirus"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <p>Some downloaded games can be blocked or quarantined by antivirus software.</p>
+        <p>Let your antivirus scan or allow this data folder if games do not start:</p>
+        <div class="folder-path-box" id="antivirus-data-path">Loading...</div>
+      </div>
+      <div class="modal-footer">
+        <button class="secondary-btn" id="modal-btn-open-security">
+          <i class="fa-solid fa-shield-halved"></i> Windows Security
+        </button>
+        <button class="secondary-btn" id="modal-btn-open-data-folder">
+          <i class="fa-solid fa-folder-open"></i> Open Data Folder
+        </button>
+        <button class="primary-btn" id="modal-btn-ok-antivirus">OK</button>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="big-picture-overlay" id="big-picture-overlay" aria-hidden="true">
+    <div class="big-picture-topbar">
+      <div>
+        <div class="big-picture-kicker">ANTIGRAVITY</div>
+        <h2>Big Picture</h2>
+      </div>
+      <div class="big-picture-topbar-actions">
+        <button class="big-picture-icon-btn" id="big-picture-fullscreen" title="Toggle fullscreen">
+          <i class="fa-solid fa-expand"></i>
+        </button>
+        <button class="big-picture-icon-btn" id="big-picture-close" title="Close Big Picture">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+    </div>
+
+    <div class="big-picture-stage">
+      <section class="big-picture-feature">
+        <div class="big-picture-cover" id="big-picture-cover">
+          <i class="fa-solid fa-gamepad"></i>
+        </div>
+        <div class="big-picture-details">
+          <h3 id="big-picture-title">No game selected</h3>
+          <p id="big-picture-path">Add games to your library to use Big Picture.</p>
+          <div class="big-picture-controls">
+            <button class="big-picture-play" id="big-picture-play">
+              <i class="fa-solid fa-play"></i> Play
+            </button>
+            <button class="big-picture-action" id="big-picture-folder">
+              <i class="fa-solid fa-folder-open"></i> Folder
+            </button>
+            <button class="big-picture-action" id="big-picture-shortcut">
+              <i class="fa-solid fa-link"></i> Shortcut
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <div class="big-picture-rail" id="big-picture-rail">
+        <!-- Rendered dynamically -->
+      </div>
+    </div>
+
+    <div class="big-picture-footer">
+      <span><i class="fa-solid fa-arrow-left"></i><i class="fa-solid fa-arrow-right"></i> Select</span>
+      <span><i class="fa-solid fa-keyboard"></i> Enter Play</span>
+      <span>A Play</span>
+      <span>B Close</span>
+      <span>X Folder</span>
+      <span>Y Shortcut</span>
+      <span>Esc Close</span>
+    </div>
   </div>
 
   <script src="renderer.js"></script>
