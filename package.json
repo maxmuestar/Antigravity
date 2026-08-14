@@ -1,0 +1,26 @@
+{
+  "name": "game-downloader-launcher",
+  "version": "1.0.0",
+  "description": "A Windows game downloader and launcher with an in-app browser and zip extraction.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-packager . GameLauncher --platform=win32 --arch=x64 --out=dist --overwrite"
+  },
+  "keywords": [
+    "launcher",
+    "downloader",
+    "games",
+    "electron"
+  ],
+  "author": "Antigravity",
+  "license": "MIT",
+  "dependencies": {
+    "adm-zip": "^0.5.14",
+    "node-unrar-js": "^2.0.2"
+  },
+  "devDependencies": {
+    "electron": "^31.1.0",
+    "electron-packager": "^17.1.2"
+  }
+}
