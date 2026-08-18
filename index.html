@@ -25,6 +25,9 @@
           <i class="fa-solid fa-gamepad logo-icon"></i>
           <span>ANTIGRAVITY</span>
         </div>
+        <button class="sound-toggle-btn" id="btn-sound-toggle" title="Toggle Interface Audio (PS5 / Steam Deck UI SFX)">
+          <i class="fa-solid fa-volume-high" id="sound-toggle-icon"></i>
+        </button>
       </div>
 
       <nav class="nav-menu">
@@ -45,6 +48,21 @@
       <!-- Configured websites container -->
       <div class="websites-list" id="websites-container">
         <!-- Rendered dynamically -->
+      </div>
+
+      <!-- Storage Info Widget -->
+      <div class="sidebar-storage-widget" id="sidebar-storage-widget">
+        <div class="storage-widget-header">
+          <span><i class="fa-solid fa-hard-drive"></i> Library Storage</span>
+          <span id="storage-game-count" class="storage-badge">0 games</span>
+        </div>
+        <div class="storage-bar-track">
+          <div class="storage-bar-fill" id="storage-bar-fill" style="width: 0%;"></div>
+        </div>
+        <div class="storage-widget-footer">
+          <span id="storage-used-text">0.00 GB used</span>
+          <button class="storage-refresh-btn" id="storage-refresh-btn" title="Refresh Storage"><i class="fa-solid fa-rotate"></i></button>
+        </div>
       </div>
 
       <!-- Active Downloads Panel -->
@@ -79,6 +97,44 @@
             <button class="primary-btn btn-sm" id="btn-big-picture">
               <i class="fa-solid fa-tv"></i> Big Picture
             </button>
+          </div>
+        </div>
+
+        <!-- Library Filter & Search Toolbar -->
+        <div class="library-toolbar">
+          <div class="library-search-box">
+            <i class="fa-solid fa-magnifying-glass search-icon"></i>
+            <input type="text" id="library-search-input" placeholder="Search games...">
+            <button class="search-clear-btn" id="library-search-clear" style="display: none;"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <div class="library-filter-pills">
+            <button class="filter-pill active" data-filter="all">All</button>
+            <button class="filter-pill" data-filter="favorites"><i class="fa-solid fa-star text-warning"></i> Favorites</button>
+            <button class="filter-pill" data-filter="recent"><i class="fa-solid fa-clock"></i> Recent</button>
+          </div>
+          <div class="custom-dropdown" id="sort-custom-dropdown">
+            <button class="custom-dropdown-btn" id="sort-dropdown-btn" type="button">
+              <i class="fa-solid fa-arrow-down-short-wide sort-icon"></i>
+              <span id="sort-selected-label">Recently Played</span>
+              <i class="fa-solid fa-chevron-down chevron-icon"></i>
+            </button>
+            <div class="custom-dropdown-menu" id="sort-dropdown-menu">
+              <div class="custom-dropdown-item active" data-value="recent">
+                <i class="fa-solid fa-clock"></i> Recently Played
+              </div>
+              <div class="custom-dropdown-item" data-value="name_asc">
+                <i class="fa-solid fa-arrow-down-a-z"></i> Name (A-Z)
+              </div>
+              <div class="custom-dropdown-item" data-value="name_desc">
+                <i class="fa-solid fa-arrow-down-z-a"></i> Name (Z-A)
+              </div>
+              <div class="custom-dropdown-item" data-value="playtime">
+                <i class="fa-solid fa-hourglass-half"></i> Most Played
+              </div>
+              <div class="custom-dropdown-item" data-value="added">
+                <i class="fa-solid fa-calendar-plus"></i> Date Added
+              </div>
+            </div>
           </div>
         </div>
 
@@ -151,6 +207,73 @@
             <i class="fa-solid fa-lock security-icon"></i>
             <input type="text" id="web-address" readonly value="about:blank">
           </div>
+          <div class="adblock-menu-wrapper" id="adblock-menu-wrapper">
+            <button class="browser-control-btn adblock-btn" id="web-adblock" title="Adblocker Control Menu">
+              <i class="fa-solid fa-shield-halved"></i>
+              <span class="adblock-status-dot active" id="adblock-status-dot"></span>
+            </button>
+            
+            <!-- In-App Glassmorphism Adblock Popup Menu -->
+            <div class="adblock-popup-menu" id="adblock-popup-menu">
+              <div class="adblock-popup-header">
+                <div class="adblock-brand">
+                  <i class="fa-solid fa-shield-halved text-success"></i>
+                  <span>Shield Adblocker</span>
+                </div>
+                <span class="adblock-badge active" id="adblock-badge-status">PROTECTED</span>
+              </div>
+              
+              <div class="adblock-popup-site-card">
+                <div class="site-card-icon"><i class="fa-solid fa-globe"></i></div>
+                <div class="site-card-info">
+                  <span class="site-domain" id="adblock-current-domain">about:blank</span>
+                  <span class="site-state" id="adblock-site-state">Ads & trackers blocked</span>
+                </div>
+              </div>
+
+              <div class="adblock-toggle-row">
+                <div class="toggle-text">
+                  <strong>Block Ads on this Site</strong>
+                  <p>Turn off if site features break</p>
+                </div>
+                <label class="switch">
+                  <input type="checkbox" id="adblock-site-toggle" checked>
+                  <span class="slider round"></span>
+                </label>
+              </div>
+
+              <div class="adblock-toggle-row">
+                <div class="toggle-text">
+                  <strong>Global Adblocking</strong>
+                  <p>Master protection switch</p>
+                </div>
+                <label class="switch">
+                  <input type="checkbox" id="adblock-global-toggle" checked>
+                  <span class="slider round"></span>
+                </label>
+              </div>
+
+              <div class="adblock-stats-row">
+                <div class="stat-box">
+                  <span class="stat-number" id="adblock-blocked-count">0</span>
+                  <span class="stat-label">Ads Blocked</span>
+                </div>
+                <div class="stat-box">
+                  <span class="stat-number text-success" id="adblock-trackers-count">0</span>
+                  <span class="stat-label">Trackers Stopped</span>
+                </div>
+              </div>
+
+              <div class="adblock-popup-actions">
+                <button class="adblock-action-btn" id="adblock-btn-reload" type="button">
+                  <i class="fa-solid fa-rotate-right"></i> Reload Page
+                </button>
+                <button class="adblock-action-btn" id="adblock-btn-update" type="button">
+                  <i class="fa-solid fa-cloud-arrow-down"></i> Update Filters
+                </button>
+              </div>
+            </div>
+          </div>
           <button class="browser-control-btn close-browser-btn" id="web-close" title="Close Browser">
             <i class="fa-solid fa-xmark"></i>
           </button>
@@ -179,11 +302,9 @@
       <div class="modal-body">
         <p>Your download <strong id="completed-game-name">Game</strong> has finished successfully and is now
           extracting/ready.</p>
-        <p>Would you like to keep downloading other games, or close the launcher application?</p>
       </div>
-      <div class="modal-footer">
-        <button class="secondary-btn" id="modal-btn-download-more">Download More</button>
-        <button class="primary-btn danger-hover" id="modal-btn-close-app">Close Launcher</button>
+      <div class="modal-footer" style="justify-content: center;">
+        <button class="primary-btn" id="modal-btn-download-more">Ga verder</button>
       </div>
     </div>
 
@@ -241,8 +362,11 @@
     <!-- Modal: Edit Game Info -->
     <div class="modal-content" id="modal-edit-game">
       <div class="modal-header">
-        <h2>Edit Game Settings</h2>
-        <button class="modal-close-btn" onclick="closeActiveModal()"><i class="fa-solid fa-xmark"></i></button>
+        <div class="modal-title-with-icon text-info">
+          <i class="fa-solid fa-pen-to-square"></i>
+          <h2>Edit Game Settings</h2>
+        </div>
+        <button class="modal-close-btn" onclick="closeActiveModal()" title="Close"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div class="modal-body">
         <div class="edit-cover-section">
@@ -250,12 +374,14 @@
             <!-- Background image cover preview -->
             <i class="fa-solid fa-image placeholder-icon"></i>
           </div>
-          <button class="secondary-btn btn-sm" id="edit-btn-change-cover">
-            <i class="fa-solid fa-upload"></i> Upload Cover
-          </button>
-          <button class="secondary-btn btn-sm" id="edit-btn-open-folder">
-            <i class="fa-solid fa-folder-open"></i> Open Folder
-          </button>
+          <div class="edit-cover-actions">
+            <button type="button" class="secondary-btn btn-sm" id="edit-btn-change-cover">
+              <i class="fa-solid fa-upload"></i> Upload Cover
+            </button>
+            <button type="button" class="secondary-btn btn-sm" id="edit-btn-open-folder">
+              <i class="fa-solid fa-folder-open"></i> Open Folder
+            </button>
+          </div>
         </div>
 
         <form class="edit-game-form" id="edit-game-form">
@@ -276,8 +402,8 @@
         </form>
       </div>
       <div class="modal-footer">
-        <button class="secondary-btn" onclick="closeActiveModal()">Cancel</button>
-        <button class="primary-btn" id="edit-btn-save">Save Changes</button>
+        <button type="button" class="secondary-btn" onclick="closeActiveModal()">Cancel</button>
+        <button type="button" class="primary-btn" id="edit-btn-save">Save Changes</button>
       </div>
     </div>
 
@@ -300,6 +426,28 @@
       <div class="modal-footer">
         <button class="secondary-btn" onclick="closeActiveModal()">Cancel</button>
         <button class="primary-btn danger-btn" id="modal-btn-confirm-delete">Remove Game</button>
+      </div>
+    </div>
+
+    <!-- Modal: Password Required for Decryption -->
+    <div class="modal-content" id="modal-password-required">
+      <div class="modal-header">
+        <div class="modal-title-with-icon text-warning">
+          <i class="fa-solid fa-lock"></i>
+          <h2>Password Required</h2>
+        </div>
+      </div>
+      <div class="modal-body">
+        <p>The archive for <strong id="password-game-name">Game</strong> is password-protected.</p>
+        <p>Please enter the password to extract the files:</p>
+        <div class="form-group">
+          <input type="text" id="extraction-password-input" class="modal-input" placeholder="Password" style="width: 100%; margin-top: 0.5rem; padding: 0.5rem; background-color: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);">
+          <div id="password-error-message" style="color: var(--accent-red); font-size: 0.85rem; margin-top: 0.5rem; display: none;">Wrong password or unsupported encryption!</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="secondary-btn" id="modal-btn-cancel-extraction">Cancel Extraction</button>
+        <button class="primary-btn" id="modal-btn-submit-password">Decrypt & Extract</button>
       </div>
     </div>
 
@@ -332,12 +480,16 @@
           <i class="fa-solid fa-shield-halved"></i>
           <h2>Check Data Folder</h2>
         </div>
-        <button class="modal-close-btn" id="modal-btn-close-antivirus"><i class="fa-solid fa-xmark"></i></button>
+        <button class="modal-close-btn" id="modal-btn-close-antivirus" title="Close"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div class="modal-body">
         <p>Some downloaded games can be blocked or quarantined by antivirus software.</p>
         <p>Let your antivirus scan or allow this data folder if games do not start:</p>
         <div class="folder-path-box" id="antivirus-data-path">Loading...</div>
+        <label class="checkbox-row" style="margin-top: 1rem;">
+          <input type="checkbox" id="antivirus-dont-show-checkbox">
+          <span>Don't show this reminder again</span>
+        </label>
       </div>
       <div class="modal-footer">
         <button class="secondary-btn" id="modal-btn-open-security">
@@ -404,7 +556,8 @@
       <span>Y Shortcut</span>
       <span>Esc Close</span>
     </div>
-  </div>
+  <!-- Toast Notifications Container -->
+  <div class="toast-container" id="toast-container"></div>
 
   <script src="renderer.js"></script>
 </body>

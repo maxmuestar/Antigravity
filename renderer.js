@@ -3,6 +3,9 @@ let appState = {
   activeTab: 'library', // 'library', 'config', 'browser'
   websites: [],
   library: [],
+  searchQuery: '',
+  activeFilter: 'all', // 'all', 'favorites', 'recent'
+  activeSort: 'recent', // 'recent', 'name_asc', 'name_desc', 'playtime', 'added'
   activeDownloads: {},
   pendingSelectionGameId: null,
   pendingLaunchGameId: null,
@@ -16,6 +19,230 @@ let appState = {
 
 const controllerRepeatMs = 220;
 const controllerAxisThreshold = 0.55;
+
+// ========================================================
+// Procedural Console Audio Synthesizer (Web Audio API)
+// ========================================================
+class SoundManager {
+  constructor() {
+    this.ctx = null;
+    this.enabled = localStorage.getItem('uiSoundEnabled') !== 'false';
+  }
+
+  initContext() {
+    if (!this.ctx) {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (AudioContext) {
+        this.ctx = new AudioContext();
+      }
+    }
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {});
+    }
+  }
+
+  toggle() {
+    this.enabled = !this.enabled;
+    localStorage.setItem('uiSoundEnabled', this.enabled ? 'true' : 'false');
+    this.updateToggleIcon();
+    if (this.enabled) {
+      this.play('click');
+      showToast('Interface Audio ON', 'Console UI sound effects enabled.', 'info', 2000);
+    } else {
+      showToast('Interface Audio MUTED', 'Console UI sound effects disabled.', 'warning', 2000);
+    }
+  }
+
+  updateToggleIcon() {
+    const btn = document.getElementById('btn-sound-toggle');
+    const icon = document.getElementById('sound-toggle-icon');
+    if (!btn || !icon) return;
+    if (this.enabled) {
+      btn.className = 'sound-toggle-btn';
+      icon.className = 'fa-solid fa-volume-high';
+    } else {
+      btn.className = 'sound-toggle-btn muted';
+      icon.className = 'fa-solid fa-volume-xmark';
+    }
+  }
+
+  play(soundType) {
+    if (!this.enabled) return;
+    try {
+      this.initContext();
+      if (!this.ctx) return;
+
+      const now = this.ctx.currentTime;
+
+      if (soundType === 'hover') {
+        // PS5 / Nintendo Switch soft menu cursor tick
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, now);
+        osc.frequency.exponentialRampToValueAtTime(1320, now + 0.035);
+        gain.gain.setValueAtTime(0.045, now);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.035);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.04);
+      } else if (soundType === 'click') {
+        // Steam Deck tactile menu selection snap
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(580, now);
+        osc.frequency.exponentialRampToValueAtTime(220, now + 0.05);
+        gain.gain.setValueAtTime(0.09, now);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.05);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.06);
+      } else if (soundType === 'launch') {
+        // Xbox / PS5 cinematic game launch power surge
+        const osc1 = this.ctx.createOscillator();
+        const osc2 = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc1.type = 'sine';
+        osc2.type = 'triangle';
+        osc1.frequency.setValueAtTime(180, now);
+        osc1.frequency.exponentialRampToValueAtTime(720, now + 0.28);
+        osc2.frequency.setValueAtTime(360, now);
+        osc2.frequency.exponentialRampToValueAtTime(1080, now + 0.28);
+        gain.gain.setValueAtTime(0.15, now);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.3);
+        osc1.connect(gain);
+        osc2.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc1.start(now);
+        osc2.start(now);
+        osc1.stop(now + 0.3);
+        osc2.stop(now + 0.3);
+      } else if (soundType === 'big_picture') {
+        // Deep cosmic chord swell
+        [329.63, 440.00, 659.25].forEach((freq, i) => {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, now + (i * 0.04));
+          gain.gain.setValueAtTime(0.08, now + (i * 0.04));
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(now + (i * 0.04));
+          osc.stop(now + 0.46);
+        });
+      } else if (soundType === 'complete') {
+        // Triumphant download chime (C5 -> E5 -> G5)
+        [523.25, 659.25, 783.99].forEach((freq, idx) => {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'sine';
+          const startTime = now + (idx * 0.08);
+          osc.frequency.setValueAtTime(freq, startTime);
+          gain.gain.setValueAtTime(0.10, startTime);
+          gain.gain.exponentialRampToValueAtTime(0.0001, startTime + 0.25);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(startTime);
+          osc.stop(startTime + 0.26);
+        });
+      }
+    } catch (e) {
+      console.warn('Audio play error:', e);
+    }
+  }
+}
+
+const sfx = new SoundManager();
+
+// Toast Notification Engine
+function showToast(title, desc = '', type = 'info', duration = 3500) {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+
+  let iconClass = 'fa-circle-info';
+  if (type === 'success') iconClass = 'fa-circle-check';
+  else if (type === 'warning') iconClass = 'fa-triangle-exclamation';
+  else if (type === 'error') iconClass = 'fa-circle-xmark';
+
+  toast.innerHTML = `
+    <i class="fa-solid ${iconClass} toast-icon"></i>
+    <div class="toast-content">
+      <div class="toast-title">${escapeHtml(title)}</div>
+      ${desc ? `<div class="toast-desc">${escapeHtml(desc)}</div>` : ''}
+    </div>
+  `;
+
+  container.appendChild(toast);
+
+  requestAnimationFrame(() => {
+    toast.classList.add('show');
+  });
+
+  setTimeout(() => {
+    toast.classList.remove('show');
+    toast.classList.add('hide');
+    setTimeout(() => {
+      if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 400);
+  }, duration);
+}
+
+// Helpers for playtime and dates
+function formatPlaytime(minutes) {
+  if (!minutes || minutes <= 0) return 'New';
+  if (minutes < 60) return `${minutes}m`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
+function formatLastPlayed(isoDate) {
+  if (!isoDate) return 'Never played';
+  const diffMs = Date.now() - new Date(isoDate).getTime();
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  if (diffHours < 1) return 'Played just now';
+  if (diffHours < 24) return 'Played today';
+  if (diffHours < 48) return 'Played yesterday';
+  const days = Math.floor(diffHours / 24);
+  if (days < 30) return `Played ${days}d ago`;
+  return `Played on ${new Date(isoDate).toLocaleDateString()}`;
+}
+
+async function updateStorageWidget() {
+  try {
+    const stats = await window.api.getStorageStats();
+    if (stats && stats.success) {
+      const countEl = document.getElementById('storage-game-count');
+      const usedEl = document.getElementById('storage-used-text');
+      const barFill = document.getElementById('storage-bar-fill');
+
+      if (countEl) countEl.innerText = `${stats.gameCount} ${stats.gameCount === 1 ? 'game' : 'games'}`;
+      
+      if (usedEl) {
+        if (stats.driveFreeGB && stats.driveFreeGB !== '0') {
+          usedEl.innerText = `${stats.totalSizeGB} GB • ${stats.driveFreeGB} GB free (${stats.driveLetter})`;
+        } else {
+          usedEl.innerText = `${stats.totalSizeGB} GB games used`;
+        }
+      }
+      
+      if (barFill) {
+        const pct = stats.driveUsedPercent || Math.min(100, Math.max(5, Math.round((parseFloat(stats.totalSizeGB) / 250) * 100)));
+        barFill.style.width = `${pct}%`;
+        barFill.title = `Schijf ${stats.driveLetter || 'C:'} is ${pct}% vol (${stats.driveFreeGB || 0} GB vrij van ${stats.driveTotalGB || 0} GB)`;
+      }
+    }
+  } catch (e) {
+    console.error('Failed to update storage stats widget:', e);
+  }
+}
 
 // Elements
 const webview = document.getElementById('game-webview');
@@ -41,6 +268,7 @@ const modalEditGame = document.getElementById('modal-edit-game');
 const modalDeleteConfirm = document.getElementById('modal-delete-confirm');
 const modalSteamWarning = document.getElementById('modal-steam-warning');
 const modalAntivirusReminder = document.getElementById('modal-antivirus-reminder');
+const modalPasswordRequired = document.getElementById('modal-password-required');
 
 // Tab buttons
 const btnLibrary = document.getElementById('btn-library');
@@ -64,8 +292,83 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupDownloadIPC();
   setupConfigForm();
   setupModalActions();
+  setupLibraryToolbar();
   await showAntivirusReminder();
 });
+
+function setupLibraryToolbar() {
+  const searchInput = document.getElementById('library-search-input');
+  const searchClear = document.getElementById('library-search-clear');
+  
+  if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+      appState.searchQuery = e.target.value.trim();
+      if (searchClear) searchClear.style.display = appState.searchQuery ? 'block' : 'none';
+      renderLibrary();
+    });
+  }
+
+  if (searchClear) {
+    searchClear.addEventListener('click', () => {
+      if (searchInput) searchInput.value = '';
+      appState.searchQuery = '';
+      searchClear.style.display = 'none';
+      renderLibrary();
+    });
+  }
+
+  document.querySelectorAll('.filter-pill').forEach(pill => {
+    pill.addEventListener('click', (e) => {
+      document.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
+      const target = e.currentTarget;
+      target.classList.add('active');
+      appState.activeFilter = target.dataset.filter;
+      renderLibrary();
+    });
+  });
+
+  // Custom Sort Dropdown
+  const customDropdown = document.getElementById('sort-custom-dropdown');
+  const dropdownBtn = document.getElementById('sort-dropdown-btn');
+  const selectedLabel = document.getElementById('sort-selected-label');
+
+  if (dropdownBtn && customDropdown) {
+    dropdownBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      customDropdown.classList.toggle('open');
+    });
+
+    document.querySelectorAll('.custom-dropdown-item').forEach(item => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        document.querySelectorAll('.custom-dropdown-item').forEach(i => i.classList.remove('active'));
+        item.classList.add('active');
+        
+        const val = item.dataset.value;
+        appState.activeSort = val;
+        
+        // Clean text (remove icon text if needed)
+        selectedLabel.innerText = item.innerText.trim();
+        customDropdown.classList.remove('open');
+        renderLibrary();
+      });
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!customDropdown.contains(e.target)) {
+        customDropdown.classList.remove('open');
+      }
+    });
+  }
+
+  const refreshStorageBtn = document.getElementById('storage-refresh-btn');
+  if (refreshStorageBtn) {
+    refreshStorageBtn.addEventListener('click', async () => {
+      await updateStorageWidget();
+      showToast('Storage Refreshed', 'Game library storage statistics updated.', 'info', 2000);
+    });
+  }
+}
 
 // Load Websites
 async function loadWebsites() {
@@ -79,6 +382,7 @@ async function loadWebsites() {
 async function loadLibrary() {
   appState.library = await window.api.getLibrary();
   renderLibrary();
+  await updateStorageWidget();
 }
 
 // Tab Navigation
@@ -90,9 +394,18 @@ function setupTabNavigation() {
   btnConfig.addEventListener('click', () => {
     switchTab('config');
   });
+
+  const soundBtn = document.getElementById('btn-sound-toggle');
+  if (soundBtn) {
+    soundBtn.addEventListener('click', () => {
+      sfx.toggle();
+    });
+  }
+  sfx.updateToggleIcon();
 }
 
 function switchTab(tabId) {
+  sfx.play('click');
   appState.activeTab = tabId;
   
   // Update nav buttons active state
@@ -171,8 +484,12 @@ function setupBigPictureControls() {
 }
 
 async function showAntivirusReminder() {
+  if (localStorage.getItem('hideAntivirusReminder') === 'true') {
+    return;
+  }
   const storageInfo = await window.api.getStorageInfo();
-  document.getElementById('antivirus-data-path').innerText = storageInfo.dataDir || 'Data folder not found';
+  const pathEl = document.getElementById('antivirus-data-path');
+  if (pathEl) pathEl.innerText = storageInfo.dataDir || 'Data folder not found';
   showModal(modalAntivirusReminder);
 }
 
@@ -224,6 +541,116 @@ function setupBrowserControls() {
     appState.lastAllowedUrl = '';
     switchTab('library');
   });
+
+  // In-App Adblock Popup Menu Handlers
+  const adblockWrapper = document.getElementById('adblock-menu-wrapper');
+  const webAdblock = document.getElementById('web-adblock');
+  const adblockStatusDot = document.getElementById('adblock-status-dot');
+  const adblockBadgeStatus = document.getElementById('adblock-badge-status');
+  const adblockCurrentDomain = document.getElementById('adblock-current-domain');
+  const adblockSiteState = document.getElementById('adblock-site-state');
+  const adblockSiteToggle = document.getElementById('adblock-site-toggle');
+  const adblockGlobalToggle = document.getElementById('adblock-global-toggle');
+  const adblockBlockedCount = document.getElementById('adblock-blocked-count');
+  const adblockTrackersCount = document.getElementById('adblock-trackers-count');
+  const adblockBtnReload = document.getElementById('adblock-btn-reload');
+  const adblockBtnUpdate = document.getElementById('adblock-btn-update');
+
+  async function refreshAdblockMenuUI() {
+    const currentUrl = webAddress.value || webview.getURL() || 'about:blank';
+    const status = await window.api.getAdblockStatus(currentUrl);
+
+    if (adblockCurrentDomain) adblockCurrentDomain.innerText = status.currentSite;
+    if (adblockSiteToggle) adblockSiteToggle.checked = status.isSiteEnabled;
+    if (adblockGlobalToggle) adblockGlobalToggle.checked = status.globalEnabled;
+    if (adblockBlockedCount) adblockBlockedCount.innerText = status.blockedRequests;
+    if (adblockTrackersCount) adblockTrackersCount.innerText = status.blockedTrackers;
+
+    if (status.globalEnabled && status.isSiteEnabled) {
+      if (adblockStatusDot) adblockStatusDot.className = 'adblock-status-dot active';
+      if (adblockBadgeStatus) {
+        adblockBadgeStatus.className = 'adblock-badge active';
+        adblockBadgeStatus.innerText = 'PROTECTED';
+      }
+      if (adblockSiteState) {
+        adblockSiteState.innerText = 'Ads & trackers blocked';
+        adblockSiteState.style.color = 'var(--text-secondary)';
+      }
+    } else {
+      if (adblockStatusDot) adblockStatusDot.className = 'adblock-status-dot';
+      if (adblockBadgeStatus) {
+        adblockBadgeStatus.className = 'adblock-badge';
+        adblockBadgeStatus.innerText = 'PAUSED';
+      }
+      if (adblockSiteState) {
+        adblockSiteState.innerText = status.globalEnabled ? 'Disabled on this site' : 'Adblocking paused globally';
+        adblockSiteState.style.color = 'var(--accent-red)';
+      }
+    }
+  }
+
+  if (webAdblock && adblockWrapper) {
+    webAdblock.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const isOpen = adblockWrapper.classList.toggle('open');
+      if (isOpen) {
+        await refreshAdblockMenuUI();
+      }
+    });
+
+    if (adblockSiteToggle) {
+      adblockSiteToggle.addEventListener('change', async () => {
+        const currentUrl = webAddress.value || webview.getURL() || '';
+        let domain = '';
+        try { domain = new URL(currentUrl).hostname; } catch (e) {}
+        if (domain) {
+          await window.api.toggleAdblockSite(domain);
+          await refreshAdblockMenuUI();
+          webview.reload();
+          showToast(adblockSiteToggle.checked ? 'Adblock Enabled' : 'Adblock Disabled', `Updated rule for ${domain}`, 'info');
+        }
+      });
+    }
+
+    if (adblockGlobalToggle) {
+      adblockGlobalToggle.addEventListener('change', async () => {
+        await window.api.toggleAdblockGlobal();
+        await refreshAdblockMenuUI();
+        webview.reload();
+        showToast(adblockGlobalToggle.checked ? 'Shield ON' : 'Shield OFF', adblockGlobalToggle.checked ? 'Global adblocking enabled' : 'Global adblocking paused', adblockGlobalToggle.checked ? 'success' : 'warning');
+      });
+    }
+
+    if (adblockBtnReload) {
+      adblockBtnReload.addEventListener('click', () => {
+        adblockWrapper.classList.remove('open');
+        webview.reload();
+      });
+    }
+
+    if (adblockBtnUpdate) {
+      adblockBtnUpdate.addEventListener('click', async () => {
+        showToast('Updating Filters', 'Fetching latest blocklists...', 'info');
+        const res = await window.api.updateAdblockFilters();
+        if (res.success) {
+          showToast('Filters Updated', 'Adblock lists are up to date.', 'success');
+        } else {
+          showToast('Update Failed', res.error || 'Could not update filters', 'error');
+        }
+      });
+    }
+
+    document.addEventListener('click', (e) => {
+      if (!adblockWrapper.contains(e.target)) {
+        adblockWrapper.classList.remove('open');
+      }
+    });
+
+    window.api.onAdblockStatsUpdated((data) => {
+      if (adblockBlockedCount) adblockBlockedCount.innerText = data.blockedRequests;
+      if (adblockTrackersCount) adblockTrackersCount.innerText = data.blockedTrackers;
+    });
+  }
   
   // Intercept navigation before it starts
   webview.addEventListener('will-navigate', (e) => {
@@ -457,9 +884,12 @@ function setupModalActions() {
   document.getElementById('modal-btn-download-more').addEventListener('click', () => {
     closeActiveModal();
   });
-  document.getElementById('modal-btn-close-app').addEventListener('click', () => {
-    window.api.closeApp();
-  });
+  const btnCloseApp = document.getElementById('modal-btn-close-app');
+  if (btnCloseApp) {
+    btnCloseApp.addEventListener('click', () => {
+      window.api.closeApp();
+    });
+  }
   
   // Select Launcher confirm (Multiple found)
   document.getElementById('modal-btn-confirm-exe').addEventListener('click', async () => {
@@ -589,8 +1019,49 @@ function setupModalActions() {
     }
   });
 
-  document.getElementById('modal-btn-ok-antivirus').addEventListener('click', closeActiveModal);
-  document.getElementById('modal-btn-close-antivirus').addEventListener('click', closeActiveModal);
+  const saveAntivirusChoice = () => {
+    const cb = document.getElementById('antivirus-dont-show-checkbox');
+    if (cb && cb.checked) {
+      localStorage.setItem('hideAntivirusReminder', 'true');
+    }
+    closeActiveModal();
+  };
+
+  document.getElementById('modal-btn-ok-antivirus').addEventListener('click', saveAntivirusChoice);
+  document.getElementById('modal-btn-close-antivirus').addEventListener('click', saveAntivirusChoice);
+
+  // Decrypt & Extract confirm
+  document.getElementById('modal-btn-submit-password').addEventListener('click', async () => {
+    const passwordInput = document.getElementById('extraction-password-input');
+    const password = passwordInput.value;
+    const gameId = appState.pendingSelectionGameId;
+
+    if (gameId) {
+      // Close the modal immediately as requested so the user doesn't wait
+      closeActiveModal();
+      passwordInput.value = '';
+
+      // Run extraction asynchronously in the background
+      window.api.submitArchivePassword(gameId, password).then((result) => {
+        if (result && result.success) {
+          loadLibrary();
+        }
+      }).catch((err) => {
+        console.error('Extraction background error:', err);
+      });
+    }
+  });
+
+  // Cancel Decrypt & Extract
+  document.getElementById('modal-btn-cancel-extraction').addEventListener('click', async () => {
+    const gameId = appState.pendingSelectionGameId;
+    if (gameId) {
+      await window.api.cancelArchiveExtraction(gameId);
+      document.getElementById('extraction-password-input').value = '';
+      document.getElementById('password-error-message').style.display = 'none';
+      closeActiveModal();
+    }
+  });
 }
 
 // Download IPC Event Hooks
@@ -605,6 +1076,9 @@ function setupDownloadIPC() {
   window.api.onDownloadCompleted((data) => {
     delete appState.activeDownloads[data.id];
     renderDownloads();
+    document.getElementById('completed-game-name').innerText = data.name;
+    sfx.play('complete');
+    showModal(modalDownloadDone);
   });
   
   // Download failed
@@ -654,6 +1128,20 @@ function setupDownloadIPC() {
 
   window.api.onLibraryUpdated(() => {
     loadLibrary();
+  });
+
+  window.api.onPromptArchivePassword((data) => {
+    appState.pendingSelectionGameId = data.id;
+    document.getElementById('password-game-name').innerText = data.title;
+    document.getElementById('extraction-password-input').value = '';
+    
+    const errorMsg = document.getElementById('password-error-message');
+    if (data.isRetry) {
+      errorMsg.style.display = 'block';
+    } else {
+      errorMsg.style.display = 'none';
+    }
+    showModal(modalPasswordRequired);
   });
 
 }
@@ -718,6 +1206,7 @@ function escapeHtml(value) {
 }
 
 async function launchGame(gameId) {
+  sfx.play('launch');
   const res = await window.api.runGame(gameId);
   if (!res.success) {
     alert(`Error starting game: ${res.error}`);
@@ -774,6 +1263,7 @@ async function toggleBigPictureFullscreen() {
 }
 
 async function openBigPicture() {
+  sfx.play('big_picture');
   appState.bigPictureActive = true;
   appState.bigPictureSelectedIndex = Math.min(
     appState.bigPictureSelectedIndex,
@@ -788,6 +1278,7 @@ async function openBigPicture() {
 }
 
 async function closeBigPicture() {
+  sfx.play('click');
   appState.bigPictureActive = false;
   stopBigPictureControllerSupport();
   bigPictureOverlay.classList.remove('active');
@@ -803,6 +1294,7 @@ async function closeBigPicture() {
 
 function selectBigPictureGame(index) {
   if (appState.library.length === 0) return;
+  sfx.play('hover');
 
   const lastIndex = appState.library.length - 1;
   if (index < 0) {
@@ -856,8 +1348,12 @@ function renderBigPictureSelection() {
   if (!game) return;
 
   const coverUrl = getCoverUrl(game);
-  bigPictureTitle.innerText = game.title;
-  bigPicturePath.innerText = game.exePath || 'No startup path selected';
+  const playtimeStr = formatPlaytime(game.playtimeMinutes);
+  const lastPlayedStr = formatLastPlayed(game.lastPlayed);
+  const favStar = game.favorite ? ' ⭐' : '';
+
+  bigPictureTitle.innerText = `${game.title}${favStar}`;
+  bigPicturePath.innerText = `${game.exePath || 'No startup path selected'} • ${playtimeStr} • ${lastPlayedStr}`;
   bigPictureCover.style.backgroundImage = coverUrl ? `url("${coverUrl}")` : 'none';
   bigPictureCover.innerHTML = coverUrl ? '' : '<i class="fa-solid fa-gamepad"></i>';
 
@@ -983,21 +1479,70 @@ function renderLibrary() {
   
   if (appState.library.length === 0) {
     libraryEmpty.style.display = 'flex';
+    const emptyTitle = document.querySelector('#library-empty h3');
+    const emptyDesc = document.querySelector('#library-empty p');
+    if (emptyTitle) emptyTitle.innerText = 'No games in library';
+    if (emptyDesc) emptyDesc.innerText = 'Choose a website from the sidebar to browse, download, and launch games!';
     if (appState.bigPictureActive) {
       renderBigPicture();
     }
     return;
   }
   
-  libraryEmpty.style.display = 'none';
-  appState.bigPictureSelectedIndex = Math.min(appState.bigPictureSelectedIndex, appState.library.length - 1);
-  
-  appState.library.forEach(game => {
+  // 1. Filter games based on search query and active filter pill
+  let filtered = [...appState.library];
+
+  if (appState.searchQuery) {
+    const q = appState.searchQuery.toLowerCase();
+    filtered = filtered.filter(g => g.title && g.title.toLowerCase().includes(q));
+  }
+
+  if (appState.activeFilter === 'favorites') {
+    filtered = filtered.filter(g => g.favorite);
+  } else if (appState.activeFilter === 'recent') {
+    filtered = filtered.filter(g => g.lastPlayed);
+  }
+
+  // 2. Sort games based on dropdown selection
+  if (appState.activeSort === 'name_asc') {
+    filtered.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+  } else if (appState.activeSort === 'name_desc') {
+    filtered.sort((a, b) => (b.title || '').localeCompare(a.title || ''));
+  } else if (appState.activeSort === 'playtime') {
+    filtered.sort((a, b) => (b.playtimeMinutes || 0) - (a.playtimeMinutes || 0));
+  } else if (appState.activeSort === 'added') {
+    filtered.sort((a, b) => Number(b.id || 0) - Number(a.id || 0));
+  } else {
+    // 'recent'
+    filtered.sort((a, b) => {
+      const timeA = a.lastPlayed ? new Date(a.lastPlayed).getTime() : 0;
+      const timeB = b.lastPlayed ? new Date(b.lastPlayed).getTime() : 0;
+      if (timeA === timeB) return Number(b.id || 0) - Number(a.id || 0);
+      return timeB - timeA;
+    });
+  }
+
+  if (filtered.length === 0) {
+    libraryEmpty.style.display = 'flex';
+    const emptyTitle = document.querySelector('#library-empty h3');
+    const emptyDesc = document.querySelector('#library-empty p');
+    if (emptyTitle) emptyTitle.innerText = 'No matching games found';
+    if (emptyDesc) emptyDesc.innerText = 'Try adjusting your search terms or filter category.';
+  } else {
+    libraryEmpty.style.display = 'none';
+  }
+
+  appState.bigPictureSelectedIndex = Math.min(appState.bigPictureSelectedIndex, Math.max(0, filtered.length - 1));
+
+  filtered.forEach(game => {
     const card = document.createElement('div');
     card.className = 'game-card';
     const safeTitle = escapeHtml(game.title);
     const safeExePath = escapeHtml(game.exePath);
     const safeGameId = escapeHtml(game.id);
+    const isFavorited = !!game.favorite;
+    const playtimeText = formatPlaytime(game.playtimeMinutes);
+    const lastPlayedText = formatLastPlayed(game.lastPlayed);
     
     // Cover rendering
     let coverHtml = `
@@ -1008,8 +1553,6 @@ function renderLibrary() {
     `;
     
     if (game.coverPath) {
-      // Load file using custom protocol
-      // Ensure the cover path has proper app-file:// structure
       const formattedCover = game.coverPath.replace('app-file://', 'app-file:///');
       coverHtml = `<img src="${escapeHtml(formattedCover)}" class="game-cover" alt="${safeTitle}">`;
     }
@@ -1017,6 +1560,12 @@ function renderLibrary() {
     card.innerHTML = `
       <div class="game-cover-container">
         ${coverHtml}
+        <button class="game-favorite-btn ${isFavorited ? 'favorited' : ''}" data-id="${safeGameId}" title="${isFavorited ? 'Remove from favorites' : 'Add to favorites'}">
+          <i class="fa-solid fa-star"></i>
+        </button>
+        <div class="game-playtime-badge">
+          <i class="fa-solid fa-clock"></i> ${escapeHtml(playtimeText)}
+        </div>
         <div class="game-actions-overlay">
           <button class="play-btn" data-id="${safeGameId}">
             <i class="fa-solid fa-play"></i> PLAY
@@ -1035,8 +1584,9 @@ function renderLibrary() {
         <div>
           <div class="game-title" title="${safeTitle}">${safeTitle}</div>
           <div class="game-exe-label" title="${safeExePath}">${safeExePath}</div>
-          <div class="game-helper-label">
-            <i class="fa-brands fa-steam"></i> Steam check before launch
+          <div class="game-card-meta-row">
+            <span><i class="fa-solid fa-calendar-day"></i> ${escapeHtml(lastPlayedText)}</span>
+            <span><i class="fa-brands fa-steam"></i> Steam check</span>
           </div>
         </div>
         <div class="action-buttons-row">
@@ -1049,7 +1599,18 @@ function renderLibrary() {
         </div>
       </div>
     `;
-    
+
+    // Attach favorite toggle event
+    card.querySelector('.game-favorite-btn').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const gId = e.currentTarget.dataset.id;
+      const res = await window.api.toggleGameFavorite(gId);
+      if (res.success) {
+        showToast(res.favorite ? 'Added to Favorites ⭐' : 'Removed from Favorites', game.title, 'info', 2000);
+        await loadLibrary();
+      }
+    });
+
     // Attach play event
     card.querySelector('.play-btn').addEventListener('click', async (e) => {
       const gId = e.currentTarget.dataset.id;
@@ -1060,7 +1621,7 @@ function renderLibrary() {
       const gId = e.currentTarget.dataset.id;
       const res = await window.api.openGameFolder(gId);
       if (!res.success) {
-        alert(`Could not open folder: ${res.error}`);
+        showToast('Could not open folder', res.error, 'error');
       }
     });
 
@@ -1068,9 +1629,9 @@ function renderLibrary() {
       const gId = e.currentTarget.dataset.id;
       const res = await window.api.createGameShortcut(gId);
       if (res.success) {
-        alert(`Shortcut created on your desktop:\n${res.path}`);
+        showToast('Desktop Shortcut Created', `Created shortcut for ${game.title}`, 'success');
       } else {
-        alert(`Could not create shortcut: ${res.error}`);
+        showToast('Shortcut Failed', res.error, 'error');
       }
     });
     
@@ -1086,6 +1647,11 @@ function renderLibrary() {
       openDeleteModal(gId);
     });
     
+    // Audio feedback on hover
+    card.addEventListener('mouseenter', () => {
+      sfx.play('hover');
+    });
+
     gamesGrid.appendChild(card);
   });
 

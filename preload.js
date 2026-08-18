@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('api', {
   setWindowFullscreen: (fullscreen) => ipcRenderer.invoke('set-window-fullscreen', fullscreen),
   isWindowFullscreen: () => ipcRenderer.invoke('is-window-fullscreen'),
   deleteGame: (gameId, deleteFiles) => ipcRenderer.invoke('delete-game', gameId, deleteFiles),
+  toggleGameFavorite: (gameId) => ipcRenderer.invoke('toggle-game-favorite', gameId),
+  getStorageStats: () => ipcRenderer.invoke('get-storage-stats'),
   selectCoverImage: () => ipcRenderer.invoke('select-cover-image'),
   selectManualExe: () => ipcRenderer.invoke('select-manual-exe'),
   
@@ -50,7 +52,19 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('prompt-no-executable', (event, data) => callback(data));
   },
   resolveExecutableSelection: (gameId, selectedExe) => ipcRenderer.invoke('resolve-executable-selection', { gameId, selectedExe }),
+  onPromptArchivePassword: (callback) => {
+    ipcRenderer.on('prompt-archive-password', (event, data) => callback(data));
+  },
+  submitArchivePassword: (gameId, password) => ipcRenderer.invoke('submit-archive-password', { gameId, password }),
+  cancelArchiveExtraction: (gameId) => ipcRenderer.invoke('cancel-archive-extraction', gameId),
   
-  // Dialog window controls
-  closeApp: () => ipcRenderer.send('close-app')
+  // Dialog window controls & Adblock
+  closeApp: () => ipcRenderer.send('close-app'),
+  getAdblockStatus: (currentUrl) => ipcRenderer.invoke('get-adblock-status', currentUrl),
+  toggleAdblockGlobal: () => ipcRenderer.invoke('toggle-adblock-global'),
+  toggleAdblockSite: (domain) => ipcRenderer.invoke('toggle-adblock-site', domain),
+  updateAdblockFilters: () => ipcRenderer.invoke('update-adblock-filters'),
+  onAdblockStatsUpdated: (callback) => {
+    ipcRenderer.on('adblock-stats-updated', (event, data) => callback(data));
+  }
 });
