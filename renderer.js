@@ -1073,6 +1073,59 @@ function setupAppUpdater() {
     showUpdateModal(updateData);
   });
 
+  window.api.onUpdateDownloadProgress((data) => {
+    const changelogCard = document.getElementById('update-changelog-card');
+    const progressCard = document.getElementById('update-progress-card');
+    const statusTitle = document.getElementById('update-status-title');
+    const percentBadge = document.getElementById('update-percent-badge');
+    const barFill = document.getElementById('update-progress-bar-fill');
+    const sizeInfo = document.getElementById('update-size-info');
+    const speedInfo = document.getElementById('update-speed-info');
+    const downloadBtn = document.getElementById('btn-download-update');
+    const restartBtn = document.getElementById('btn-restart-update');
+    const cancelBtn = document.getElementById('btn-update-cancel');
+
+    if (data.status === 'downloading') {
+      if (changelogCard) changelogCard.style.display = 'none';
+      if (progressCard) progressCard.style.display = 'flex';
+      if (statusTitle) statusTitle.innerHTML = '<i class="fa-solid fa-arrows-rotate spin-icon"></i> Downloading Update...';
+      if (percentBadge) percentBadge.innerText = `${data.percent}%`;
+      if (barFill) barFill.style.width = `${data.percent}%`;
+      if (sizeInfo) sizeInfo.innerText = `${data.received} / ${data.total} MB`;
+      if (speedInfo) speedInfo.innerText = `${data.speed} MB/s`;
+      if (downloadBtn) downloadBtn.style.display = 'none';
+      if (cancelBtn) cancelBtn.style.display = 'none';
+    } else if (data.status === 'extracting') {
+      if (statusTitle) statusTitle.innerHTML = '<i class="fa-solid fa-gear spin-icon"></i> Extracting Update Files...';
+      if (percentBadge) percentBadge.innerText = '100%';
+      if (barFill) barFill.style.width = '100%';
+      if (sizeInfo) sizeInfo.innerText = 'Unpacking files';
+      if (speedInfo) speedInfo.innerText = 'Please wait...';
+    } else if (data.status === 'ready_to_install') {
+      sfx.play('complete');
+      if (statusTitle) statusTitle.innerHTML = '<i class="fa-solid fa-circle-check text-success"></i> Update Ready to Install!';
+      if (percentBadge) percentBadge.innerText = 'Ready';
+      if (sizeInfo) sizeInfo.innerText = 'All user data preserved';
+      if (speedInfo) speedInfo.innerText = 'Restart required';
+      if (downloadBtn) downloadBtn.style.display = 'none';
+      if (restartBtn) restartBtn.style.display = 'inline-flex';
+      if (cancelBtn) {
+        cancelBtn.style.display = 'inline-block';
+        cancelBtn.innerText = 'Restart Later';
+      }
+      showToast('Update Ready!', 'Click Restart to apply the new version.', 'success');
+    } else if (data.status === 'error') {
+      if (statusTitle) statusTitle.innerHTML = '<i class="fa-solid fa-circle-xmark text-danger"></i> Update Failed';
+      if (sizeInfo) sizeInfo.innerText = data.error || 'Unknown error';
+      if (downloadBtn) {
+        downloadBtn.style.display = 'inline-flex';
+        downloadBtn.disabled = false;
+        downloadBtn.innerHTML = '<i class="fa-solid fa-rotate-right"></i> Retry Download';
+      }
+      if (cancelBtn) cancelBtn.style.display = 'inline-block';
+    }
+  });
+
   const checkBtn = document.getElementById('btn-check-update');
   if (checkBtn) {
     checkBtn.addEventListener('click', async () => {
@@ -1099,13 +1152,23 @@ function setupAppUpdater() {
 
   const downloadBtn = document.getElementById('btn-download-update');
   if (downloadBtn) {
-    downloadBtn.addEventListener('click', () => {
+    downloadBtn.addEventListener('click', async () => {
       if (currentUpdateData?.assetDownloadUrl) {
-        sfx.play('click');
-        window.api.openExternalUrl(currentUpdateData.assetDownloadUrl);
-        closeActiveModal();
-        showToast('Downloading Update', 'Opening download link in your browser...', 'info');
+        sfx.play('launch');
+        downloadBtn.disabled = true;
+        downloadBtn.innerHTML = '<i class="fa-solid fa-arrows-rotate spin-icon"></i> Starting...';
+        await window.api.startAppUpdateDownload(currentUpdateData.assetDownloadUrl);
       }
+    });
+  }
+
+  const restartBtn = document.getElementById('btn-restart-update');
+  if (restartBtn) {
+    restartBtn.addEventListener('click', () => {
+      sfx.play('launch');
+      restartBtn.disabled = true;
+      restartBtn.innerHTML = '<i class="fa-solid fa-arrows-rotate spin-icon"></i> Restarting...';
+      window.api.applyAppUpdateAndRestart();
     });
   }
 
@@ -1127,6 +1190,25 @@ function showUpdateModal(data) {
   const titleEl = document.getElementById('update-release-title');
   const notesEl = document.getElementById('update-release-notes');
   const sizeEl = document.getElementById('update-asset-size');
+  const changelogCard = document.getElementById('update-changelog-card');
+  const progressCard = document.getElementById('update-progress-card');
+  const downloadBtn = document.getElementById('btn-download-update');
+  const restartBtn = document.getElementById('btn-restart-update');
+  const cancelBtn = document.getElementById('btn-update-cancel');
+
+  // Reset modal state
+  if (changelogCard) changelogCard.style.display = 'flex';
+  if (progressCard) progressCard.style.display = 'none';
+  if (downloadBtn) {
+    downloadBtn.style.display = 'inline-flex';
+    downloadBtn.disabled = false;
+    downloadBtn.innerHTML = `<i class="fa-solid fa-cloud-arrow-down"></i> Update Now (${data.assetSize || '103 MB'})`;
+  }
+  if (restartBtn) restartBtn.style.display = 'none';
+  if (cancelBtn) {
+    cancelBtn.style.display = 'inline-block';
+    cancelBtn.innerText = 'Later';
+  }
 
   if (curEl) curEl.innerText = `v${data.currentVersion}`;
   if (newEl) newEl.innerText = `v${data.latestVersion.replace(/^v/, '')}`;

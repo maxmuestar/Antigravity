@@ -71,7 +71,12 @@ contextBridge.exposeInMainWorld('api', {
   // App Auto-Updater (GitHub Releases)
   checkAppUpdate: (manual) => ipcRenderer.invoke('check-app-update', manual),
   openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
+  startAppUpdateDownload: (downloadUrl) => ipcRenderer.invoke('start-app-update-download', downloadUrl),
+  applyAppUpdateAndRestart: () => ipcRenderer.invoke('apply-app-update-and-restart'),
   onAppUpdateAvailable: (callback) => {
     ipcRenderer.on('app-update-available', (event, data) => callback(data));
+  },
+  onUpdateDownloadProgress: (callback) => {
+    ipcRenderer.on('update-download-progress', (event, data) => callback(data));
   }
 });

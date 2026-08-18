@@ -113,6 +113,249 @@ async function checkAppUpdates(manual = false) {
   }
 }
 
+let pendingUpdateState = null;
+
+function downloadFileWithRedirects(fileUrl, destPath, onProgress) {
+  return new Promise((resolve, reject) => {
+    function makeRequest(currentUrl, redirectCount = 0) {
+      if (redirectCount > 10) {
+        return reject(new Error('Too many redirects'));
+      }
+
+      const { URL } = require('url');
+      const http = require('http');
+      const parsed = new URL(currentUrl);
+      const protocol = parsed.protocol === 'https:' ? https : http;
+
+      const req = protocol.get(currentUrl, {
+        headers: {
+          'User-Agent': 'AntiGravity-Launcher'
+        }
+      }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          const redirectUrl = new URL(res.headers.location, currentUrl).href;
+          return makeRequest(redirectUrl, redirectCount + 1);
+        }
+
+        if (res.statusCode !== 200) {
+          return reject(new Error(`Download failed with HTTP ${res.statusCode}`));
+        }
+
+        const totalBytes = parseInt(res.headers['content-length'] || '0', 10);
+        let receivedBytes = 0;
+        let lastTime = Date.now();
+        let lastBytes = 0;
+
+        const fileStream = fs.createWriteStream(destPath);
+
+        res.on('data', (chunk) => {
+          receivedBytes += chunk.length;
+          const now = Date.now();
+          if (now - lastTime >= 350) {
+            const speed = (receivedBytes - lastBytes) / ((now - lastTime) / 1000);
+            const percent = totalBytes > 0 ? ((receivedBytes / totalBytes) * 100).toFixed(1) : '0.0';
+            if (onProgress) {
+              onProgress({
+                received: (receivedBytes / (1024 * 1024)).toFixed(1),
+                total: (totalBytes / (1024 * 1024)).toFixed(1),
+                percent,
+                speed: (speed / (1024 * 1024)).toFixed(2)
+              });
+            }
+            lastTime = now;
+            lastBytes = receivedBytes;
+          }
+        });
+
+        res.pipe(fileStream);
+
+        fileStream.on('finish', () => {
+          fileStream.close(() => resolve(destPath));
+        });
+
+        fileStream.on('error', (err) => {
+          fs.unlink(destPath, () => {});
+          reject(err);
+        });
+      });
+
+      req.on('error', reject);
+    }
+
+    makeRequest(fileUrl);
+  });
+}
+
+async function startAppUpdateDownload(downloadUrl) {
+  try {
+    const tempDir = path.join(userDataDir, '_update_temp');
+    if (fs.existsSync(tempDir)) {
+      try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (e) {}
+    }
+    fs.mkdirSync(tempDir, { recursive: true });
+
+    const updateZipPath = path.join(tempDir, 'update.zip');
+    const extractDir = path.join(tempDir, 'extracted');
+    fs.mkdirSync(extractDir, { recursive: true });
+
+    console.log('[AUTO-UPDATER] Downloading update from:', downloadUrl);
+    mainWindow?.webContents.send('update-download-progress', {
+      status: 'downloading',
+      percent: '0.0',
+      speed: '0.00',
+      received: '0.0',
+      total: '0.0'
+    });
+
+    await downloadFileWithRedirects(downloadUrl, updateZipPath, (p) => {
+      mainWindow?.webContents.send('update-download-progress', {
+        status: 'downloading',
+        percent: p.percent,
+        speed: p.speed,
+        received: p.received,
+        total: p.total
+      });
+    });
+
+    console.log('[AUTO-UPDATER] Download finished. Extracting...');
+    mainWindow?.webContents.send('update-download-progress', {
+      status: 'extracting',
+      percent: '100.0',
+      speed: '0.00',
+      received: '',
+      total: ''
+    });
+
+    // Extract update package
+    await extractArchive(updateZipPath, extractDir, '.zip', '');
+
+    // Locate extracted root folder (may be extractDir directly or a subfolder like GameLauncher-win32-x64)
+    let srcFolder = extractDir;
+    const contents = fs.readdirSync(extractDir);
+    if (contents.length === 1 && fs.statSync(path.join(extractDir, contents[0])).isDirectory()) {
+      srcFolder = path.join(extractDir, contents[0]);
+    }
+
+    // Safety: ensure extracted source doesn't have a data dir that could overwrite user data
+    const srcDataDir = path.join(srcFolder, 'data');
+    if (fs.existsSync(srcDataDir)) {
+      try { fs.rmSync(srcDataDir, { recursive: true, force: true }); } catch (e) {}
+    }
+
+    // Generate PowerShell update script with robust process cleanup and robocopy
+    const psScriptPath = path.join(tempDir, 'apply_update.ps1');
+    const vbsScriptPath = path.join(tempDir, 'run_update.vbs');
+    const logPath = path.join(userDataDir, 'updater_log.txt');
+    const exePath = app.isPackaged 
+      ? process.execPath 
+      : path.join(appRootDir, 'dist', 'GameLauncher-win32-x64', 'GameLauncher.exe');
+
+    const srcDataDirFormatted = path.join(srcFolder, 'data').replace(/\\/g, '\\\\');
+    const dstDataDirFormatted = path.join(appRootDir, 'data').replace(/\\/g, '\\\\');
+
+    const psContent = `
+try {
+    Start-Transcript -Path "${logPath.replace(/\\/g, '\\\\')}" -Force
+} catch {}
+
+Write-Host "Update process started. Waiting for all GameLauncher processes to terminate..."
+
+# Terminate and wait for any lingering Electron processes to release file locks
+$deadline = (Get-Date).AddSeconds(8)
+while ((Get-Date) -lt $deadline) {
+    $procs = Get-Process -Name "GameLauncher", "electron" -ErrorAction SilentlyContinue
+    if (-not $procs) { break }
+    $procs | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 250
+}
+
+Start-Sleep -Milliseconds 750
+
+Write-Host "Copying updated files from '${srcFolder.replace(/\\/g, '\\\\')}' to '${appRootDir.replace(/\\/g, '\\\\')}' (excluding data/)..."
+$src = "${srcFolder.replace(/\\/g, '\\\\')}"
+$dst = "${appRootDir.replace(/\\/g, '\\\\')}"
+$srcData = "${srcDataDirFormatted}"
+$dstData = "${dstDataDirFormatted}"
+
+if (Test-Path -LiteralPath $src) {
+    # Use robocopy with automatic retries for locked files
+    robocopy "$src" "$dst" /E /XD "$srcData" "$dstData" /R:5 /W:1 > $null
+    Write-Host "Files updated successfully!"
+} else {
+    Write-Host "Source directory not found: $src"
+}
+
+# Clean up temp folder
+$tmp = "${tempDir.replace(/\\/g, '\\\\')}"
+if (Test-Path -LiteralPath $tmp) {
+    try { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue } catch {}
+}
+
+# Restart the updated application
+$exe = "${exePath.replace(/\\/g, '\\\\')}"
+if (Test-Path -LiteralPath $exe) {
+    Write-Host "Restarting application: $exe"
+    Start-Process -FilePath $exe
+} else {
+    Write-Host "Executable not found at: $exe"
+}
+
+try {
+    Stop-Transcript
+} catch {}
+`;
+
+    fs.writeFileSync(psScriptPath, psContent, 'utf-8');
+
+    // Create silent VBS wrapper so Windows launches PowerShell completely independent of the Node/Electron process tree
+    const vbsContent = `Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -File """ & "${psScriptPath.replace(/\\/g, '\\\\')}" & """", 0, False
+`;
+    fs.writeFileSync(vbsScriptPath, vbsContent, 'utf-8');
+
+    pendingUpdateState = {
+      vbsScriptPath
+    };
+
+    console.log('[AUTO-UPDATER] Update prepared and ready to apply!');
+    mainWindow?.webContents.send('update-download-progress', {
+      status: 'ready_to_install'
+    });
+
+    return { success: true };
+  } catch (err) {
+    console.error('[AUTO-UPDATER] Update failed:', err);
+    mainWindow?.webContents.send('update-download-progress', {
+      status: 'error',
+      error: err.message
+    });
+    return { success: false, error: err.message };
+  }
+}
+
+function applyAppUpdateAndRestart() {
+  if (!pendingUpdateState || !pendingUpdateState.vbsScriptPath) {
+    return { success: false, error: 'No update ready to install' };
+  }
+
+  const { vbsScriptPath } = pendingUpdateState;
+
+  console.log('[AUTO-UPDATER] Spawning independent updater via wscript and quitting app...');
+  try {
+    const { spawnSync } = require('child_process');
+    spawnSync('wscript.exe', [vbsScriptPath], { stdio: 'ignore' });
+
+    setTimeout(() => {
+      app.exit(0);
+    }, 200);
+
+    return { success: true };
+  } catch (err) {
+    console.error('[AUTO-UPDATER] Failed to spawn updater:', err);
+    return { success: false, error: err.message };
+  }
+}
+
 // Register app-file scheme to load covers and media safely
 protocol.registerSchemesAsPrivileged([
   { scheme: 'app-file', privileges: { bypassCSP: true, secure: true, supportFetchAPI: true } }
@@ -1955,6 +2198,14 @@ ipcMain.handle('cancel-archive-extraction', (event, gameId) => {
 
 ipcMain.handle('check-app-update', async (event, manual) => {
   return await checkAppUpdates(!!manual);
+});
+
+ipcMain.handle('start-app-update-download', async (event, downloadUrl) => {
+  return await startAppUpdateDownload(downloadUrl);
+});
+
+ipcMain.handle('apply-app-update-and-restart', () => {
+  return applyAppUpdateAndRestart();
 });
 
 ipcMain.handle('open-external-url', async (event, url) => {
