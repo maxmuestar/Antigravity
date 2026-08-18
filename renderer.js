@@ -1482,8 +1482,8 @@ function renderBigPicture() {
 
     const coverUrl = getCoverUrl(game);
     item.innerHTML = coverUrl
-      ? `<img src="${escapeHtml(coverUrl)}" alt="${escapeHtml(game.title)}"><span>${escapeHtml(game.title)}</span>`
-      : `<div class="big-picture-game-placeholder"><i class="fa-solid fa-gamepad"></i></div><span>${escapeHtml(game.title)}</span>`;
+      ? `<img src="${escapeHtml(coverUrl)}" alt="${escapeHtml(game.title)}">`
+      : `<div class="big-picture-game-placeholder"><i class="fa-solid fa-gamepad"></i><span>${escapeHtml(game.title)}</span></div>`;
 
     item.addEventListener('click', () => {
       selectBigPictureGame(index);
