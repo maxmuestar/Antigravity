@@ -274,6 +274,7 @@ let currentUpdateData = null;
 
 // Tab buttons
 const btnLibrary = document.getElementById('btn-library');
+const btnMinecraft = document.getElementById('btn-minecraft');
 const btnConfig = document.getElementById('btn-config');
 
 window.api.onLaunchGameRequested((gameId) => {
@@ -296,6 +297,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupModalActions();
   setupLibraryToolbar();
   setupAppUpdater();
+  setupMinecraftHub();
   await showAntivirusReminder();
 });
 
@@ -390,11 +392,15 @@ async function loadLibrary() {
 
 // Tab Navigation
 function setupTabNavigation() {
-  btnLibrary.addEventListener('click', () => {
+  btnLibrary?.addEventListener('click', () => {
     switchTab('library');
   });
+
+  btnMinecraft?.addEventListener('click', () => {
+    switchTab('minecraft');
+  });
   
-  btnConfig.addEventListener('click', () => {
+  btnConfig?.addEventListener('click', () => {
     switchTab('config');
   });
 
@@ -416,14 +422,16 @@ function switchTab(tabId) {
   document.querySelectorAll('.website-link').forEach(link => link.classList.remove('active'));
   
   if (tabId === 'library') {
-    btnLibrary.classList.add('active');
+    btnLibrary?.classList.add('active');
+  } else if (tabId === 'minecraft') {
+    btnMinecraft?.classList.add('active');
   } else if (tabId === 'config') {
-    btnConfig.classList.add('active');
+    btnConfig?.classList.add('active');
   }
   
   // Switch content panel
   document.querySelectorAll('.content-tab').forEach(tab => tab.classList.remove('active'));
-  document.getElementById(`tab-${tabId}`).classList.add('active');
+  document.getElementById(`tab-${tabId}`)?.classList.add('active');
 }
 
 function setupLibraryActions() {
@@ -1866,3 +1874,524 @@ function openDeleteModal(gameId) {
   
   showModal(modalDeleteConfirm);
 }
+
+// ========================================================
+// Minecraft Launcher & Mod Center Frontend Controller
+// ========================================================
+let mcState = {
+  activeTab: 'mod', // 'mod', 'modpack', 'resourcepack', 'shader', 'installed'
+  profile: null,
+  config: {
+    version: '1.20.1',
+    loader: 'fabric',
+    ramMin: 2,
+    ramMax: 4
+  },
+  searchQuery: '',
+  searchDebounce: null,
+  isLaunching: false,
+  installedMods: []
+};
+
+let mcHubInitialized = false;
+
+async function setupMinecraftHub() {
+  if (mcHubInitialized) return;
+  mcHubInitialized = true;
+
+  const btnLoginMs = document.getElementById('mc-btn-login-ms');
+  const btnOffline = document.getElementById('mc-btn-offline-mode');
+  const btnLogout = document.getElementById('mc-btn-logout');
+  const selectVersion = document.getElementById('mc-select-version');
+  const selectLoader = document.getElementById('mc-select-loader');
+  const ramSlider = document.getElementById('mc-ram-slider');
+  const ramDisplay = document.getElementById('mc-ram-display');
+  const btnLaunch = document.getElementById('mc-btn-launch');
+  const searchInput = document.getElementById('mc-mod-search-input');
+  const searchClear = document.getElementById('mc-mod-search-clear');
+  const sortSelect = document.getElementById('mc-filter-sort');
+  const consoleToggle = document.getElementById('mc-console-toggle');
+  const btnOpenMods = document.getElementById('mc-btn-open-mods-folder');
+  const btnOpenMc = document.getElementById('mc-btn-open-mc-folder');
+
+  try {
+    mcState.profile = await window.api.mcGetProfile();
+    mcState.config = await window.api.mcGetConfig();
+  } catch (e) {
+    console.warn('Failed to load initial MC profile/config:', e);
+  }
+
+  renderMinecraftAccount();
+
+  // Populate config controls
+  if (selectVersion && mcState.config?.version) selectVersion.value = mcState.config.version;
+  if (selectLoader && mcState.config?.loader) selectLoader.value = mcState.config.loader;
+  if (ramSlider && mcState.config?.ramMax) {
+    ramSlider.value = mcState.config.ramMax;
+    if (ramDisplay) ramDisplay.innerText = `${mcState.config.ramMax} GB`;
+  }
+
+  // Fetch official versions to populate dropdown
+  window.api.mcGetVersions().then(res => {
+    if (res && res.versions && selectVersion) {
+      const currentVal = selectVersion.value;
+      selectVersion.innerHTML = '';
+      res.versions.forEach(v => {
+        const opt = document.createElement('option');
+        opt.value = v.id;
+        opt.innerText = v.id === res.latest?.release ? `${v.id} (Latest Release)` : v.id;
+        if (v.id === currentVal) opt.selected = true;
+        selectVersion.appendChild(opt);
+      });
+      if (!res.versions.some(v => v.id === currentVal)) {
+        selectVersion.value = res.versions[0]?.id || '1.20.1';
+      }
+    }
+  }).catch(() => {});
+
+  // Config change listeners
+  const saveCurrentConfig = () => {
+    if (!selectVersion || !selectLoader || !ramSlider) return;
+    mcState.config.version = selectVersion.value;
+    mcState.config.loader = selectLoader.value;
+    mcState.config.ramMax = parseInt(ramSlider.value, 10);
+    mcState.config.ramMin = Math.max(2, Math.floor(mcState.config.ramMax / 2));
+    window.api.mcSaveConfig(mcState.config);
+  };
+
+  selectVersion?.addEventListener('change', () => {
+    saveCurrentConfig();
+    searchModrinthMods();
+  });
+  selectLoader?.addEventListener('change', () => {
+    saveCurrentConfig();
+    searchModrinthMods();
+  });
+  ramSlider?.addEventListener('input', (e) => {
+    const val = e.target.value;
+    if (ramDisplay) ramDisplay.innerText = `${val} GB`;
+    saveCurrentConfig();
+  });
+
+  // Microsoft Login
+  btnLoginMs?.addEventListener('click', async () => {
+    sfx.play('click');
+    showToast('Microsoft Login', 'Opening secure Microsoft login window...', 'info', 4000);
+    const res = await window.api.mcLoginMicrosoft();
+    if (res && res.success) {
+      mcState.profile = res.profile;
+      renderMinecraftAccount();
+      sfx.play('action');
+      showToast('Welcome, ' + res.profile.gamertag + '!', 'Microsoft Account linked successfully.', 'success', 4000);
+    } else {
+      showToast('Login Canceled / Failed', res?.error || 'Could not authenticate Microsoft account.', 'error', 4000);
+    }
+  });
+
+  // Offline Player Profile
+  btnOffline?.addEventListener('click', async () => {
+    sfx.play('click');
+    const name = prompt('Enter your offline player name:', 'Steve');
+    if (name && name.trim()) {
+      const res = await window.api.mcSetOfflineProfile(name.trim());
+      if (res && res.success) {
+        mcState.profile = res.profile;
+        renderMinecraftAccount();
+        sfx.play('action');
+        showToast('Offline Mode Active', `Playing as ${name.trim()}.`, 'info', 3000);
+      }
+    }
+  });
+
+  // Logout
+  btnLogout?.addEventListener('click', async () => {
+    sfx.play('click');
+    await window.api.mcLogout();
+    mcState.profile = null;
+    renderMinecraftAccount();
+    showToast('Signed Out', 'Minecraft account disconnected.', 'info', 2500);
+  });
+
+  // Folder Openers
+  btnOpenMods?.addEventListener('click', () => {
+    sfx.play('click');
+    window.api.mcOpenFolder('mods');
+  });
+  btnOpenMc?.addEventListener('click', () => {
+    sfx.play('click');
+    window.api.mcOpenFolder('root');
+  });
+
+  // Mod Center Tab switching
+  document.querySelectorAll('.mc-mod-tab').forEach(tab => {
+    tab.addEventListener('click', (e) => {
+      sfx.play('hover');
+      document.querySelectorAll('.mc-mod-tab').forEach(t => t.classList.remove('active'));
+      const target = e.currentTarget;
+      target.classList.add('active');
+      mcState.activeTab = target.dataset.tab;
+
+      const browseToolbar = document.getElementById('mc-browse-toolbar');
+      const modsGrid = document.getElementById('mc-mods-grid');
+      const installedContainer = document.getElementById('mc-installed-container');
+
+      if (mcState.activeTab === 'installed') {
+        if (browseToolbar) browseToolbar.style.display = 'none';
+        if (modsGrid) modsGrid.style.display = 'none';
+        if (installedContainer) installedContainer.style.display = 'flex';
+        loadInstalledMods();
+      } else {
+        if (browseToolbar) browseToolbar.style.display = 'flex';
+        if (modsGrid) modsGrid.style.display = 'grid';
+        if (installedContainer) installedContainer.style.display = 'none';
+        searchModrinthMods();
+      }
+    });
+  });
+
+  // Search & Filters
+  searchInput?.addEventListener('input', (e) => {
+    mcState.searchQuery = e.target.value.trim();
+    if (searchClear) searchClear.style.display = mcState.searchQuery ? 'block' : 'none';
+    clearTimeout(mcState.searchDebounce);
+    mcState.searchDebounce = setTimeout(() => {
+      searchModrinthMods();
+    }, 350);
+  });
+
+  searchClear?.addEventListener('click', () => {
+    if (searchInput) searchInput.value = '';
+    mcState.searchQuery = '';
+    searchClear.style.display = 'none';
+    searchModrinthMods();
+  });
+
+  sortSelect?.addEventListener('change', () => {
+    searchModrinthMods();
+  });
+
+  // Play Minecraft Button
+  btnLaunch?.addEventListener('click', () => {
+    launchMinecraft();
+  });
+
+  // Console Drawer Toggle
+  consoleToggle?.addEventListener('click', () => {
+    const drawer = document.getElementById('mc-console-drawer');
+    if (drawer) drawer.classList.toggle('collapsed');
+  });
+
+  // Listeners for Launch & Download Progress from Main process
+  window.api.onMcLaunchProgress((data) => {
+    const progressBox = document.getElementById('mc-launch-progress-box');
+    const statusText = document.getElementById('mc-launch-status-text');
+    const percentEl = document.getElementById('mc-launch-percent');
+    const barFill = document.getElementById('mc-launch-bar-fill');
+
+    if (progressBox) progressBox.style.display = 'flex';
+    if (percentEl) percentEl.innerText = `${data.percent || 0}%`;
+    if (barFill) barFill.style.width = `${data.percent || 0}%`;
+    if (statusText) {
+      if (data.type === 'assets') {
+        statusText.innerHTML = `<i class="fa-solid fa-cloud-arrow-down spin-icon"></i> Downloading Assets (${data.current || 0}/${data.total || 0})...`;
+      } else if (data.type === 'natives' || data.type === 'classes') {
+        statusText.innerHTML = `<i class="fa-solid fa-gear spin-icon"></i> Unpacking Libraries & Natives...`;
+      } else {
+        statusText.innerHTML = `<i class="fa-solid fa-arrows-rotate spin-icon"></i> Loading ${data.name || data.task || 'Minecraft'}...`;
+      }
+    }
+  });
+
+  window.api.onMcLog((log) => {
+    const consoleOutput = document.getElementById('mc-console-output');
+    if (consoleOutput) {
+      consoleOutput.innerText += `\n${log}`;
+      consoleOutput.scrollTop = consoleOutput.scrollHeight;
+    }
+  });
+
+  window.api.onMcClosed((data) => {
+    mcState.isLaunching = false;
+    const btnLaunch = document.getElementById('mc-btn-launch');
+    const progressBox = document.getElementById('mc-launch-progress-box');
+    if (btnLaunch) {
+      btnLaunch.disabled = false;
+      btnLaunch.innerHTML = '<i class="fa-solid fa-play"></i> <span>PLAY MINECRAFT</span>';
+    }
+    if (progressBox) {
+      setTimeout(() => { progressBox.style.display = 'none'; }, 2000);
+    }
+    showToast('Minecraft Closed', `Game process finished (code ${data?.exitCode || 0}).`, 'info', 3000);
+  });
+
+  // Initial load
+  loadInstalledMods();
+  searchModrinthMods();
+}
+
+function renderMinecraftAccount() {
+  const avatar = document.getElementById('mc-account-avatar');
+  const nameEl = document.getElementById('mc-account-name');
+  const typeEl = document.getElementById('mc-account-type');
+  const btnLoginMs = document.getElementById('mc-btn-login-ms');
+  const btnOffline = document.getElementById('mc-btn-offline-mode');
+  const btnLogout = document.getElementById('mc-btn-logout');
+
+  if (mcState.profile) {
+    if (avatar) avatar.src = mcState.profile.skinUrl || 'https://crafatar.com/avatars/steve?overlay';
+    if (nameEl) nameEl.innerText = mcState.profile.gamertag || 'Player';
+    if (typeEl) typeEl.innerText = mcState.profile.isOffline ? 'Offline Profile' : 'Microsoft Account';
+    if (btnLoginMs) btnLoginMs.style.display = 'none';
+    if (btnOffline) btnOffline.style.display = 'none';
+    if (btnLogout) btnLogout.style.display = 'inline-flex';
+  } else {
+    if (avatar) avatar.src = 'https://crafatar.com/avatars/steve?overlay';
+    if (nameEl) nameEl.innerText = 'Not Logged In';
+    if (typeEl) typeEl.innerText = 'Microsoft Account';
+    if (btnLoginMs) btnLoginMs.style.display = 'inline-flex';
+    if (btnOffline) btnOffline.style.display = 'inline-flex';
+    if (btnLogout) btnLogout.style.display = 'none';
+  }
+}
+
+async function searchModrinthMods() {
+  const grid = document.getElementById('mc-mods-grid');
+  if (!grid) return;
+
+  grid.innerHTML = '<div class="library-loading"><i class="fa-solid fa-arrows-rotate spin-icon"></i> Loading popular mods from Modrinth...</div>';
+
+  const selectVersion = document.getElementById('mc-select-version');
+  const selectLoader = document.getElementById('mc-select-loader');
+  const sortSelect = document.getElementById('mc-filter-sort');
+
+  const version = selectVersion ? selectVersion.value : '1.20.1';
+  const loader = selectLoader ? selectLoader.value : 'fabric';
+  const index = sortSelect ? sortSelect.value : 'relevance';
+
+  try {
+    const res = await window.api.mcSearchModrinth({
+      query: mcState.searchQuery,
+      projectType: mcState.activeTab,
+      loader: loader,
+      version: version,
+      limit: 18,
+      index: index
+    });
+
+    renderModrinthCards(res.hits || []);
+  } catch (err) {
+    console.error('Failed to search Modrinth:', err);
+    grid.innerHTML = `<div class="library-empty"><i class="fa-solid fa-triangle-exclamation"></i><p>Could not load mods: ${escapeHtml(err.message)}</p></div>`;
+  }
+}
+
+function renderModrinthCards(hits) {
+  const grid = document.getElementById('mc-mods-grid');
+  if (!grid) return;
+
+  if (hits.length === 0) {
+    grid.innerHTML = '<div class="library-empty"><i class="fa-solid fa-magnifying-glass"></i><p>No mods found matching your query or version.</p></div>';
+    return;
+  }
+
+  grid.innerHTML = '';
+  hits.forEach(item => {
+    const card = document.createElement('div');
+    card.className = 'mc-mod-card';
+
+    const iconHtml = item.icon_url
+      ? `<img class="mc-mod-icon" src="${escapeHtml(item.icon_url)}" alt="${escapeHtml(item.title)}">`
+      : `<div class="mc-mod-icon-placeholder"><i class="fa-solid fa-cube"></i></div>`;
+
+    const downloadsFormatted = item.downloads > 1000000
+      ? (item.downloads / 1000000).toFixed(1) + 'M'
+      : item.downloads > 1000
+      ? (item.downloads / 1000).toFixed(1) + 'k'
+      : item.downloads;
+
+    const tagsHtml = (item.categories || []).slice(0, 3).map(cat => `<span class="mc-tag">${escapeHtml(cat)}</span>`).join('');
+
+    card.innerHTML = `
+      <div class="mc-mod-header-row">
+        ${iconHtml}
+        <div class="mc-mod-meta">
+          <div class="mc-mod-title" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</div>
+          <div class="mc-mod-author">by ${escapeHtml(item.author || 'Author')}</div>
+        </div>
+      </div>
+      <div class="mc-mod-desc">${escapeHtml(item.description || 'No description available.')}</div>
+      <div class="mc-mod-footer-row">
+        <div class="mc-mod-tags">
+          <span class="mc-downloads-chip"><i class="fa-solid fa-download"></i> ${downloadsFormatted}</span>
+          ${tagsHtml}
+        </div>
+        <button class="mc-install-btn" data-project-id="${escapeHtml(item.project_id || item.slug)}" data-project-type="${escapeHtml(item.project_type || 'mod')}">
+          <i class="fa-solid fa-plus"></i> Install
+        </button>
+      </div>
+    `;
+
+    const installBtn = card.querySelector('.mc-install-btn');
+    installBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      installModrinthProject(item, installBtn);
+    });
+
+    grid.appendChild(card);
+  });
+}
+
+async function installModrinthProject(project, btn) {
+  sfx.play('click');
+  const originalHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-arrows-rotate spin-icon"></i> Fetching...';
+
+  const selectVersion = document.getElementById('mc-select-version');
+  const selectLoader = document.getElementById('mc-select-loader');
+  const version = selectVersion ? selectVersion.value : '1.20.1';
+  const loader = selectLoader ? selectLoader.value : 'fabric';
+
+  try {
+    const versions = await window.api.mcGetProjectVersions(project.project_id || project.slug, loader, version);
+    if (!versions || versions.length === 0) {
+      btn.innerHTML = '<i class="fa-solid fa-xmark"></i> No version';
+      showToast('Version Unavailable', `No compatible build found for ${version} on ${loader}.`, 'warning', 3000);
+      setTimeout(() => { btn.disabled = false; btn.innerHTML = originalHtml; }, 2500);
+      return;
+    }
+
+    const latestVer = versions[0];
+    const file = latestVer.files.find(f => f.primary) || latestVer.files[0];
+    if (!file) {
+      throw new Error('No downloadable file attached');
+    }
+
+    btn.innerHTML = '<i class="fa-solid fa-download spin-icon"></i> Downloading...';
+
+    const res = await window.api.mcInstallMod(file.url, file.filename, project.project_type || 'mod');
+    if (res && res.success) {
+      sfx.play('download_complete');
+      btn.className = 'mc-install-btn installed';
+      btn.innerHTML = '<i class="fa-solid fa-check"></i> Installed';
+      showToast('Mod Installed!', `${project.title} added to your Minecraft instance.`, 'success', 3000);
+      loadInstalledMods();
+    } else {
+      throw new Error(res?.error || 'Installation failed');
+    }
+  } catch (err) {
+    console.error('Install error:', err);
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Error';
+    showToast('Installation Failed', err.message, 'error', 3500);
+    setTimeout(() => { btn.innerHTML = originalHtml; }, 3000);
+  }
+}
+
+async function loadInstalledMods() {
+  const installedList = document.getElementById('mc-installed-list');
+  const countBadge = document.getElementById('mc-installed-count');
+  if (!installedList) return;
+
+  const mods = await window.api.mcGetInstalledMods();
+  mcState.installedMods = mods;
+  if (countBadge) countBadge.innerText = mods.length;
+
+  if (mods.length === 0) {
+    installedList.innerHTML = '<div class="library-empty"><i class="fa-solid fa-box-open"></i><p>No mods installed yet. Browse Modrinth above to install mods in 1-click!</p></div>';
+    return;
+  }
+
+  installedList.innerHTML = '';
+  mods.forEach(mod => {
+    const item = document.createElement('div');
+    item.className = `mc-installed-item ${mod.enabled ? '' : 'disabled'}`;
+
+    item.innerHTML = `
+      <div class="mc-installed-item-info">
+        <i class="fa-solid fa-file-zipper text-success"></i>
+        <div style="min-width: 0;">
+          <div class="mc-installed-item-name" title="${escapeHtml(mod.cleanName)}">${escapeHtml(mod.cleanName)}</div>
+          <div class="mc-installed-item-size">${mod.size}</div>
+        </div>
+      </div>
+      <div class="mc-installed-item-actions">
+        <label class="switch">
+          <input type="checkbox" class="mc-mod-toggle" ${mod.enabled ? 'checked' : ''}>
+          <span class="slider round"></span>
+        </label>
+        <button class="icon-only-btn text-danger mc-btn-delete-mod" title="Delete mod">
+          <i class="fa-solid fa-trash-can"></i>
+        </button>
+      </div>
+    `;
+
+    const toggle = item.querySelector('.mc-mod-toggle');
+    toggle.addEventListener('change', async (e) => {
+      sfx.play('click');
+      const enable = e.target.checked;
+      await window.api.mcToggleMod(mod.filename, enable);
+      loadInstalledMods();
+    });
+
+    const deleteBtn = item.querySelector('.mc-btn-delete-mod');
+    deleteBtn.addEventListener('click', async () => {
+      if (confirm(`Are you sure you want to delete ${mod.cleanName}?`)) {
+        sfx.play('click');
+        await window.api.mcDeleteMod(mod.filename);
+        showToast('Mod Removed', `${mod.cleanName} deleted.`, 'info', 2000);
+        loadInstalledMods();
+      }
+    });
+
+    installedList.appendChild(item);
+  });
+}
+
+async function launchMinecraft() {
+  if (mcState.isLaunching) return;
+
+  const btnLaunch = document.getElementById('mc-btn-launch');
+  const progressBox = document.getElementById('mc-launch-progress-box');
+  const statusText = document.getElementById('mc-launch-status-text');
+  const percentEl = document.getElementById('mc-launch-percent');
+  const barFill = document.getElementById('mc-launch-bar-fill');
+  const consoleOutput = document.getElementById('mc-console-output');
+
+  mcState.isLaunching = true;
+  sfx.play('launch');
+
+  if (btnLaunch) {
+    btnLaunch.disabled = true;
+    btnLaunch.innerHTML = '<i class="fa-solid fa-arrows-rotate spin-icon"></i> <span>STARTING...</span>';
+  }
+  if (progressBox) {
+    progressBox.style.display = 'flex';
+    if (barFill) barFill.style.width = '5%';
+    if (percentEl) percentEl.innerText = '5%';
+    if (statusText) statusText.innerHTML = '<i class="fa-solid fa-arrows-rotate spin-icon"></i> Resolving Version & Dependencies...';
+  }
+  if (consoleOutput) {
+    consoleOutput.innerText = `[ANTIGRAVITY] Launching Minecraft ${mcState.config.version || '1.20.1'} (${mcState.config.loader || 'fabric'})...\n`;
+  }
+
+  showToast('Launching Minecraft', `Starting Minecraft with ${mcState.config.ramMax || 4} GB RAM...`, 'info', 3000);
+
+  const res = await window.api.mcLaunchGame({
+    version: mcState.config.version || '1.20.1',
+    loader: mcState.config.loader || 'fabric',
+    ramMin: mcState.config.ramMin || 2,
+    ramMax: mcState.config.ramMax || 4
+  });
+
+  if (!res.success) {
+    mcState.isLaunching = false;
+    if (btnLaunch) {
+      btnLaunch.disabled = false;
+      btnLaunch.innerHTML = '<i class="fa-solid fa-play"></i> <span>PLAY MINECRAFT</span>';
+    }
+    if (progressBox) progressBox.style.display = 'none';
+    showToast('Launch Failed', res.error || 'Could not launch Minecraft.', 'error', 5000);
+  }
+}
+

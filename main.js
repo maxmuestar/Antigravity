@@ -6,6 +6,9 @@ const { spawn } = require('child_process');
 const AdmZip = require('adm-zip');
 const { createExtractorFromFile } = require('node-unrar-js');
 const { ElectronBlocker } = require('@ghostery/adblocker-electron');
+const MinecraftService = require('./minecraft-service');
+
+let minecraftService = null;
 
 const GITHUB_REPO_OWNER = 'maxmuestar';
 const GITHUB_REPO_NAME = 'Antigravity';
@@ -612,8 +615,11 @@ function initPaths() {
   recoverUnregisteredGames();
   writeStorageInfo();
 
+  minecraftService = new MinecraftService(userDataDir);
+
   console.log('[STORAGE] App root:', appRootDir);
   console.log('[STORAGE] Data folder:', userDataDir);
+  console.log('[MINECRAFT] Folder:', minecraftService.mcDir);
 }
 
 function getFilesRecursively(dir, filesList = []) {
@@ -2214,4 +2220,98 @@ ipcMain.handle('open-external-url', async (event, url) => {
     return { success: true };
   }
   return { success: false, error: 'Invalid URL' };
+});
+
+// --- Minecraft Launcher IPC Handlers ---
+ipcMain.handle('mc-login-microsoft', async () => {
+  if (!minecraftService) return { success: false, error: 'Service not initialized' };
+  return await minecraftService.loginMicrosoft();
+});
+
+ipcMain.handle('mc-set-offline-profile', async (event, username) => {
+  if (!minecraftService) return { success: false, error: 'Service not initialized' };
+  return minecraftService.setOfflineProfile(username);
+});
+
+ipcMain.handle('mc-get-profile', () => {
+  if (!minecraftService) return null;
+  return minecraftService.getProfile();
+});
+
+ipcMain.handle('mc-logout', () => {
+  if (!minecraftService) return { success: false };
+  return minecraftService.logout();
+});
+
+ipcMain.handle('mc-get-config', () => {
+  if (!minecraftService) return {};
+  return minecraftService.getConfig();
+});
+
+ipcMain.handle('mc-save-config', (event, config) => {
+  if (!minecraftService) return {};
+  return minecraftService.saveConfig(config);
+});
+
+ipcMain.handle('mc-get-versions', async () => {
+  if (!minecraftService) return { success: false, versions: [] };
+  return await minecraftService.getVersions();
+});
+
+ipcMain.handle('mc-search-modrinth', async (event, params) => {
+  if (!minecraftService) return { hits: [], total_hits: 0 };
+  return await minecraftService.searchModrinth(params || {});
+});
+
+ipcMain.handle('mc-get-project-versions', async (event, { projectId, loader, version }) => {
+  if (!minecraftService) return [];
+  return await minecraftService.getModrinthProjectVersions(projectId, loader, version);
+});
+
+ipcMain.handle('mc-install-mod', async (event, { fileUrl, fileName, projectType }) => {
+  if (!minecraftService) return { success: false, error: 'Service not initialized' };
+  return await minecraftService.installModFile(fileUrl, fileName, projectType, (p) => {
+    mainWindow?.webContents.send('mc-mod-download-progress', { fileName, ...p });
+  });
+});
+
+ipcMain.handle('mc-get-installed-mods', () => {
+  if (!minecraftService) return [];
+  return minecraftService.getInstalledMods();
+});
+
+ipcMain.handle('mc-toggle-mod', (event, { filename, enable }) => {
+  if (!minecraftService) return { success: false };
+  return minecraftService.toggleMod(filename, enable);
+});
+
+ipcMain.handle('mc-delete-mod', (event, filename) => {
+  if (!minecraftService) return { success: false };
+  return minecraftService.deleteMod(filename);
+});
+
+ipcMain.handle('mc-open-folder', (event, folderType) => {
+  if (!minecraftService) return { success: false };
+  let target = minecraftService.mcDir;
+  if (folderType === 'mods') target = minecraftService.modsDir;
+  if (folderType === 'resourcepacks') target = minecraftService.resourcePacksDir;
+  if (folderType === 'shaderpacks') target = minecraftService.shaderPacksDir;
+  shell.openPath(target);
+  return { success: true };
+});
+
+ipcMain.handle('mc-launch-game', async (event, launchConfig) => {
+  if (!minecraftService) return { success: false, error: 'Service not initialized' };
+  return await minecraftService.launchGame(
+    launchConfig,
+    (progress) => {
+      mainWindow?.webContents.send('mc-launch-progress', progress);
+    },
+    (logData) => {
+      mainWindow?.webContents.send('mc-log', logData);
+    },
+    (exitCode) => {
+      mainWindow?.webContents.send('mc-closed', { exitCode });
+    }
+  );
 });

@@ -35,6 +35,10 @@
           <i class="fa-solid fa-layer-group"></i>
           <span>Library</span>
         </button>
+        <button class="nav-btn" id="btn-minecraft">
+          <i class="fa-solid fa-cube text-success"></i>
+          <span>Minecraft</span>
+        </button>
         <button class="nav-btn" id="btn-config">
           <i class="fa-solid fa-circle-plus"></i>
           <span>Add Website</span>
@@ -294,6 +298,168 @@
           <webview id="game-webview" src="about:blank" allowpopups
             useragent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36">
           </webview>
+        </div>
+      </section>
+
+      <!-- Minecraft Hub View -->
+      <section class="content-tab" id="tab-minecraft">
+        <div class="view-header mc-header">
+          <div>
+            <div class="mc-kicker"><i class="fa-solid fa-cube"></i> MINECRAFT JAVA EDITION</div>
+            <h1>Minecraft Launcher & Mod Center</h1>
+            <p class="subtitle">Official Microsoft Account Login, Modrinth Mods, Shaders & 1-Click Launch.</p>
+          </div>
+          <div class="view-header-actions mc-header-actions">
+            <!-- Account Badge -->
+            <div class="mc-account-card" id="mc-account-card">
+              <div class="mc-account-avatar-wrapper">
+                <img id="mc-account-avatar" src="https://crafatar.com/avatars/steve?overlay" alt="Player Skin">
+              </div>
+              <div class="mc-account-info">
+                <span class="mc-account-name" id="mc-account-name">Not Logged In</span>
+                <span class="mc-account-type" id="mc-account-type">Microsoft Account</span>
+              </div>
+              <div class="mc-account-actions">
+                <button class="primary-btn btn-sm btn-success" id="mc-btn-login-ms" title="Log in with official Microsoft Account">
+                  <i class="fa-brands fa-microsoft"></i> Login
+                </button>
+                <button class="secondary-btn btn-sm" id="mc-btn-offline-mode" title="Play with offline player name">
+                  <i class="fa-solid fa-user"></i> Offline
+                </button>
+                <button class="icon-only-btn text-danger" id="mc-btn-logout" title="Sign out" style="display: none;">
+                  <i class="fa-solid fa-right-from-bracket"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Launch & Instance Configuration Showcase -->
+        <div class="mc-hero-launch-card">
+          <div class="mc-hero-bg-glow"></div>
+          <div class="mc-config-row">
+            <div class="mc-config-group">
+              <label><i class="fa-solid fa-code-branch"></i> Game Version</label>
+              <select class="mc-select" id="mc-select-version">
+                <option value="1.21.1">1.21.1 (Latest Release)</option>
+                <option value="1.20.1" selected>1.20.1 (Best for Mods)</option>
+                <option value="1.19.4">1.19.4</option>
+                <option value="1.18.2">1.18.2</option>
+                <option value="1.16.5">1.16.5</option>
+                <option value="1.12.2">1.12.2</option>
+                <option value="1.8.9">1.8.9 (PvP)</option>
+                <option value="1.7.10">1.7.10</option>
+              </select>
+            </div>
+
+            <div class="mc-config-group">
+              <label><i class="fa-solid fa-microchip"></i> Mod Loader</label>
+              <select class="mc-select" id="mc-select-loader">
+                <option value="fabric" selected>Fabric (Optimized & Fast)</option>
+                <option value="forge">Forge (Classic)</option>
+                <option value="neoforge">NeoForge</option>
+                <option value="quilt">Quilt</option>
+                <option value="vanilla">Vanilla (Unmodded)</option>
+              </select>
+            </div>
+
+            <div class="mc-config-group mc-ram-group">
+              <div class="mc-ram-label-row">
+                <label><i class="fa-solid fa-memory"></i> RAM Allocation</label>
+                <span class="mc-ram-value" id="mc-ram-display">4 GB</span>
+              </div>
+              <input type="range" min="2" max="16" step="1" value="4" class="mc-ram-slider" id="mc-ram-slider">
+            </div>
+
+            <div class="mc-launch-action-wrapper">
+              <button class="mc-play-btn" id="mc-btn-launch">
+                <i class="fa-solid fa-play"></i>
+                <span>PLAY MINECRAFT</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Launch Progress Status -->
+          <div class="mc-launch-progress-box" id="mc-launch-progress-box" style="display: none;">
+            <div class="mc-launch-progress-info">
+              <span id="mc-launch-status-text"><i class="fa-solid fa-arrows-rotate spin-icon"></i> Preparing Minecraft...</span>
+              <span id="mc-launch-percent">0%</span>
+            </div>
+            <div class="mc-progress-bar-bg">
+              <div class="mc-progress-bar-fill" id="mc-launch-bar-fill" style="width: 0%;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Mod Center Navigation & Browser -->
+        <div class="mc-mod-center-container">
+          <div class="mc-mod-tabs-header">
+            <div class="mc-mod-tabs">
+              <button class="mc-mod-tab active" data-tab="mod"><i class="fa-solid fa-puzzle-piece"></i> Mods</button>
+              <button class="mc-mod-tab" data-tab="modpack"><i class="fa-solid fa-box-open"></i> Modpacks</button>
+              <button class="mc-mod-tab" data-tab="resourcepack"><i class="fa-solid fa-palette"></i> Resource Packs</button>
+              <button class="mc-mod-tab" data-tab="shader"><i class="fa-solid fa-sun"></i> Shader Packs</button>
+              <button class="mc-mod-tab" data-tab="installed"><i class="fa-solid fa-folder-check"></i> Installed Mods (<span id="mc-installed-count">0</span>)</button>
+            </div>
+
+            <div class="mc-quick-folder-actions">
+              <button class="secondary-btn btn-sm" id="mc-btn-open-mods-folder" title="Open mods directory">
+                <i class="fa-solid fa-folder-open"></i> Mods Folder
+              </button>
+              <button class="secondary-btn btn-sm" id="mc-btn-open-mc-folder" title="Open .minecraft directory">
+                <i class="fa-solid fa-cube"></i> Game Folder
+              </button>
+            </div>
+          </div>
+
+          <!-- Search & Filter Toolbar -->
+          <div class="mc-toolbar" id="mc-browse-toolbar">
+            <div class="mc-search-box">
+              <i class="fa-solid fa-magnifying-glass search-icon"></i>
+              <input type="text" id="mc-mod-search-input" placeholder="Search thousands of mods on Modrinth (Sodium, Iris, JEI, Xaero's...)...">
+              <button class="search-clear-btn" id="mc-mod-search-clear" style="display: none;"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <div class="mc-toolbar-filters">
+              <select class="mc-select-sm" id="mc-filter-sort">
+                <option value="relevance">Sort: Relevance</option>
+                <option value="downloads">Sort: Most Downloads</option>
+                <option value="follows">Sort: Most Popular</option>
+                <option value="newest">Sort: Newly Added</option>
+                <option value="updated">Sort: Recently Updated</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Modrinth Results Grid -->
+          <div class="mc-mods-grid" id="mc-mods-grid">
+            <!-- Rendered dynamically -->
+          </div>
+
+          <!-- Installed Mods List Container -->
+          <div class="mc-installed-container" id="mc-installed-container" style="display: none;">
+            <div class="mc-installed-header">
+              <h3>Installed Mods & Addons</h3>
+              <p>Toggle mods on/off or delete without opening File Explorer.</p>
+            </div>
+            <div class="mc-installed-list" id="mc-installed-list">
+              <!-- Rendered dynamically -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Optional Collapsible Console Log Drawer -->
+        <div class="mc-console-drawer" id="mc-console-drawer">
+          <div class="mc-console-header" id="mc-console-toggle">
+            <div class="mc-console-title">
+              <i class="fa-solid fa-terminal"></i>
+              <span>Game Output & Crash Logs</span>
+            </div>
+            <i class="fa-solid fa-chevron-up mc-console-arrow"></i>
+          </div>
+          <div class="mc-console-body" id="mc-console-body">
+            <pre id="mc-console-output">Game logs will appear here when launched...</pre>
+          </div>
         </div>
       </section>
 

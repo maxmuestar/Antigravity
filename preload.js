@@ -78,5 +78,26 @@ contextBridge.exposeInMainWorld('api', {
   },
   onUpdateDownloadProgress: (callback) => {
     ipcRenderer.on('update-download-progress', (event, data) => callback(data));
-  }
+  },
+
+  // Minecraft Launcher & Mod Center
+  mcLoginMicrosoft: () => ipcRenderer.invoke('mc-login-microsoft'),
+  mcSetOfflineProfile: (username) => ipcRenderer.invoke('mc-set-offline-profile', username),
+  mcGetProfile: () => ipcRenderer.invoke('mc-get-profile'),
+  mcLogout: () => ipcRenderer.invoke('mc-logout'),
+  mcGetConfig: () => ipcRenderer.invoke('mc-get-config'),
+  mcSaveConfig: (config) => ipcRenderer.invoke('mc-save-config', config),
+  mcGetVersions: () => ipcRenderer.invoke('mc-get-versions'),
+  mcSearchModrinth: (params) => ipcRenderer.invoke('mc-search-modrinth', params),
+  mcGetProjectVersions: (projectId, loader, version) => ipcRenderer.invoke('mc-get-project-versions', { projectId, loader, version }),
+  mcInstallMod: (fileUrl, fileName, projectType) => ipcRenderer.invoke('mc-install-mod', { fileUrl, fileName, projectType }),
+  mcGetInstalledMods: () => ipcRenderer.invoke('mc-get-installed-mods'),
+  mcToggleMod: (filename, enable) => ipcRenderer.invoke('mc-toggle-mod', { filename, enable }),
+  mcDeleteMod: (filename) => ipcRenderer.invoke('mc-delete-mod', filename),
+  mcOpenFolder: (folderType) => ipcRenderer.invoke('mc-open-folder', folderType),
+  mcLaunchGame: (launchConfig) => ipcRenderer.invoke('mc-launch-game', launchConfig),
+  onMcLaunchProgress: (callback) => ipcRenderer.on('mc-launch-progress', (e, data) => callback(data)),
+  onMcModDownloadProgress: (callback) => ipcRenderer.on('mc-mod-download-progress', (e, data) => callback(data)),
+  onMcLog: (callback) => ipcRenderer.on('mc-log', (e, log) => callback(log)),
+  onMcClosed: (callback) => ipcRenderer.on('mc-closed', (e, data) => callback(data))
 });
