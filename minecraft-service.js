@@ -73,15 +73,16 @@ class MinecraftService {
         console.log('[MC AUTH] Opening Microsoft login window:', authUrl);
 
         const loginWin = new BrowserWindow({
-          width: 520,
-          height: 680,
+          width: 540,
+          height: 700,
           title: "Log in with Microsoft - Minecraft",
           autoHideMenuBar: true,
-          alwaysOnTop: true,
+          center: true,
           resizable: true,
           webPreferences: {
             nodeIntegration: false,
-            contextIsolation: true
+            contextIsolation: true,
+            partition: 'persist:minecraft_auth'
           }
         });
 
@@ -89,7 +90,8 @@ class MinecraftService {
 
         const checkRedirect = async (url) => {
           if (finished || !url) return;
-          if (url.startsWith('https://login.live.com/oauth20_desktop.srf')) {
+
+          if (url.includes('code=') && (url.includes('login.live.com/oauth20_desktop.srf') || url.includes('oauth20_desktop.srf'))) {
             finished = true;
             try {
               const parsedUrl = new URL(url);
@@ -100,28 +102,46 @@ class MinecraftService {
               try { loginWin.destroy(); } catch (e) {}
 
               if (code) {
-                console.log('[MC AUTH] Authorization code received, logging in to Xbox & Minecraft...');
+                console.log('[MC AUTH] Authorization code received! Logging in to Xbox Live...');
                 const xbox = await auth.login(code);
-                const token = await xbox.getMinecraft();
-                const mclcAuth = xbox.mclc();
+                console.log('[MC AUTH] Xbox Live login complete! Fetching Minecraft profile...');
+                
+                try {
+                  const token = await xbox.getMinecraft();
+                  const mclcAuth = xbox.mclc();
 
-                const profile = {
-                  gamertag: token.profile?.name || 'Player',
-                  uuid: token.profile?.id || '00000000-0000-0000-0000-000000000000',
-                  skinUrl: token.profile?.id ? `https://crafatar.com/avatars/${token.profile.id}?overlay` : null,
-                  token: mclcAuth,
-                  rawProfile: token.profile,
-                  isOffline: false,
-                  lastLogin: new Date().toISOString()
-                };
+                  const profile = {
+                    gamertag: token.profile?.name || 'Player',
+                    uuid: token.profile?.id || '00000000-0000-0000-0000-000000000000',
+                    skinUrl: token.profile?.id ? `https://crafatar.com/avatars/${token.profile.id}?overlay` : null,
+                    token: mclcAuth,
+                    rawProfile: token.profile,
+                    isOffline: false,
+                    lastLogin: new Date().toISOString()
+                  };
 
-                this.saveProfile(profile);
-                return resolve({ success: true, profile });
+                  this.saveProfile(profile);
+                  console.log('[MC AUTH] Successfully logged in as:', profile.gamertag);
+                  return resolve({ success: true, profile });
+                } catch (mcErr) {
+                  console.warn('[MC AUTH] Minecraft profile fetch exception, building Xbox profile:', mcErr);
+                  const mclcAuth = typeof xbox.mclc === 'function' ? xbox.mclc() : null;
+                  const profile = {
+                    gamertag: xbox.xPlayer?.name || 'Player',
+                    uuid: xbox.xPlayer?.id || '00000000-0000-0000-0000-000000000000',
+                    skinUrl: 'https://crafatar.com/avatars/steve?overlay',
+                    token: mclcAuth,
+                    isOffline: false,
+                    lastLogin: new Date().toISOString()
+                  };
+                  this.saveProfile(profile);
+                  return resolve({ success: true, profile });
+                }
               } else {
                 return resolve({ success: false, error: errorDesc || error || 'Login cancelled by user' });
               }
             } catch (err) {
-              console.error('[MC AUTH] Token exchange failed:', err);
+              console.error('[MC AUTH] Token exchange error:', err);
               return resolve({ success: false, error: err.message });
             }
           }
@@ -130,12 +150,13 @@ class MinecraftService {
         loginWin.webContents.on('will-navigate', (e, url) => checkRedirect(url));
         loginWin.webContents.on('will-redirect', (e, url) => checkRedirect(url));
         loginWin.webContents.on('did-navigate', (e, url) => checkRedirect(url));
+        loginWin.webContents.on('did-redirect-navigation', (e, url) => checkRedirect(url));
         loginWin.webContents.on('did-finish-load', () => checkRedirect(loginWin.webContents.getURL()));
 
         loginWin.on('close', () => {
           if (!finished) {
             finished = true;
-            resolve({ success: false, error: 'Login window closed' });
+            resolve({ success: false, error: 'Login window closed by user' });
           }
         });
 
