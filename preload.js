@@ -66,5 +66,12 @@ contextBridge.exposeInMainWorld('api', {
   updateAdblockFilters: () => ipcRenderer.invoke('update-adblock-filters'),
   onAdblockStatsUpdated: (callback) => {
     ipcRenderer.on('adblock-stats-updated', (event, data) => callback(data));
+  },
+  
+  // App Auto-Updater (GitHub Releases)
+  checkAppUpdate: (manual) => ipcRenderer.invoke('check-app-update', manual),
+  openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
+  onAppUpdateAvailable: (callback) => {
+    ipcRenderer.on('app-update-available', (event, data) => callback(data));
   }
 });

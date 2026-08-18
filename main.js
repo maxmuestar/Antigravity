@@ -1,10 +1,117 @@
 const { app, BrowserWindow, ipcMain, dialog, session, protocol, net, Menu, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const https = require('https');
 const { spawn } = require('child_process');
 const AdmZip = require('adm-zip');
 const { createExtractorFromFile } = require('node-unrar-js');
 const { ElectronBlocker } = require('@ghostery/adblocker-electron');
+
+const GITHUB_REPO_OWNER = 'maxmuestar';
+const GITHUB_REPO_NAME = 'Antigravity';
+
+function parseSemVer(ver) {
+  if (!ver) return [0, 0, 0];
+  const cleaned = String(ver).replace(/^v/i, '').trim();
+  const parts = cleaned.split('.').map(p => parseInt(p, 10) || 0);
+  while (parts.length < 3) parts.push(0);
+  return parts;
+}
+
+function isNewerVersion(currentVer, latestVer) {
+  const [cMaj, cMin, cPatch] = parseSemVer(currentVer);
+  const [lMaj, lMin, lPatch] = parseSemVer(latestVer);
+  if (lMaj > cMaj) return true;
+  if (lMaj < cMaj) return false;
+  if (lMin > cMin) return true;
+  if (lMin < cMin) return false;
+  return lPatch > cPatch;
+}
+
+async function fetchLatestGitHubRelease() {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'api.github.com',
+      path: `/repos/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/releases/latest`,
+      headers: {
+        'User-Agent': 'AntiGravity-Launcher'
+      },
+      timeout: 8000
+    };
+
+    const req = https.get(options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          try {
+            const json = JSON.parse(data);
+            resolve(json);
+          } catch (e) {
+            reject(new Error('Failed to parse GitHub response'));
+          }
+        } else if (res.statusCode === 404) {
+          resolve(null);
+        } else {
+          reject(new Error(`GitHub API returned status ${res.statusCode}`));
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('GitHub request timed out'));
+    });
+  });
+}
+
+async function checkAppUpdates(manual = false) {
+  try {
+    const release = await fetchLatestGitHubRelease();
+    const currentVer = app.getVersion();
+
+    if (!release || !release.tag_name) {
+      return { success: true, updateAvailable: false, manual, currentVersion: currentVer };
+    }
+
+    const latestVer = release.tag_name;
+    const hasUpdate = isNewerVersion(currentVer, latestVer);
+
+    let assetDownloadUrl = release.html_url;
+    let assetName = 'Update Package';
+    let assetSize = '';
+
+    if (Array.isArray(release.assets) && release.assets.length > 0) {
+      const zipAsset = release.assets.find(a => a.name.endsWith('.zip') || a.name.endsWith('.exe')) || release.assets[0];
+      if (zipAsset) {
+        assetDownloadUrl = zipAsset.browser_download_url;
+        assetName = zipAsset.name;
+        assetSize = (zipAsset.size / (1024 * 1024)).toFixed(1) + ' MB';
+      }
+    }
+
+    const payload = {
+      success: true,
+      updateAvailable: hasUpdate,
+      currentVersion: currentVer,
+      latestVersion: latestVer,
+      releaseName: release.name || latestVer,
+      releaseNotes: release.body || 'Performance improvements and bug fixes.',
+      publishedAt: release.published_at,
+      releaseUrl: release.html_url,
+      assetDownloadUrl,
+      assetName,
+      assetSize,
+      manual
+    };
+
+    return payload;
+  } catch (err) {
+    console.warn('[UPDATE CHECK] Error:', err.message);
+    return { success: false, error: err.message, manual, currentVersion: app.getVersion() };
+  }
+}
 
 // Register app-file scheme to load covers and media safely
 protocol.registerSchemesAsPrivileged([
@@ -841,6 +948,16 @@ function createWindow() {
       mainWindow.webContents.send('launch-game-requested', pendingLaunchGameId);
       pendingLaunchGameId = null;
     }
+
+    // Auto check for GitHub updates 3 seconds after startup
+    setTimeout(async () => {
+      try {
+        const update = await checkAppUpdates(false);
+        if (update && update.updateAvailable && mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('app-update-available', update);
+        }
+      } catch (e) {}
+    }, 3000);
   });
 }
 
@@ -1834,4 +1951,16 @@ ipcMain.handle('cancel-archive-extraction', (event, gameId) => {
     return { success: true };
   }
   return { success: false };
+});
+
+ipcMain.handle('check-app-update', async (event, manual) => {
+  return await checkAppUpdates(!!manual);
+});
+
+ipcMain.handle('open-external-url', async (event, url) => {
+  if (url && (url.startsWith('https://') || url.startsWith('http://'))) {
+    shell.openExternal(url);
+    return { success: true };
+  }
+  return { success: false, error: 'Invalid URL' };
 });

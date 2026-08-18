@@ -269,6 +269,8 @@ const modalDeleteConfirm = document.getElementById('modal-delete-confirm');
 const modalSteamWarning = document.getElementById('modal-steam-warning');
 const modalAntivirusReminder = document.getElementById('modal-antivirus-reminder');
 const modalPasswordRequired = document.getElementById('modal-password-required');
+const modalAppUpdate = document.getElementById('modal-app-update');
+let currentUpdateData = null;
 
 // Tab buttons
 const btnLibrary = document.getElementById('btn-library');
@@ -293,6 +295,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupConfigForm();
   setupModalActions();
   setupLibraryToolbar();
+  setupAppUpdater();
   await showAntivirusReminder();
 });
 
@@ -1059,9 +1062,80 @@ function setupModalActions() {
       await window.api.cancelArchiveExtraction(gameId);
       document.getElementById('extraction-password-input').value = '';
       document.getElementById('password-error-message').style.display = 'none';
-      closeActiveModal();
+        closeActiveModal();
     }
   });
+}
+
+// GitHub App Updater UI logic
+function setupAppUpdater() {
+  window.api.onAppUpdateAvailable((updateData) => {
+    showUpdateModal(updateData);
+  });
+
+  const checkBtn = document.getElementById('btn-check-update');
+  if (checkBtn) {
+    checkBtn.addEventListener('click', async () => {
+      checkBtn.classList.add('checking');
+      sfx.play('click');
+      try {
+        const res = await window.api.checkAppUpdate(true);
+        checkBtn.classList.remove('checking');
+        if (!res.success) {
+          showToast('Update Check Failed', res.error || 'Could not connect to GitHub.', 'error');
+          return;
+        }
+        if (res.updateAvailable) {
+          showUpdateModal(res);
+        } else {
+          showToast('Up to Date! 🎉', `You are running the latest version (${res.currentVersion}).`, 'success');
+        }
+      } catch (err) {
+        checkBtn.classList.remove('checking');
+        showToast('Update Check Failed', err.message, 'error');
+      }
+    });
+  }
+
+  const downloadBtn = document.getElementById('btn-download-update');
+  if (downloadBtn) {
+    downloadBtn.addEventListener('click', () => {
+      if (currentUpdateData?.assetDownloadUrl) {
+        sfx.play('click');
+        window.api.openExternalUrl(currentUpdateData.assetDownloadUrl);
+        closeActiveModal();
+        showToast('Downloading Update', 'Opening download link in your browser...', 'info');
+      }
+    });
+  }
+
+  const openReleaseBtn = document.getElementById('btn-open-release-page');
+  if (openReleaseBtn) {
+    openReleaseBtn.addEventListener('click', () => {
+      if (currentUpdateData?.releaseUrl) {
+        sfx.play('click');
+        window.api.openExternalUrl(currentUpdateData.releaseUrl);
+      }
+    });
+  }
+}
+
+function showUpdateModal(data) {
+  currentUpdateData = data;
+  const curEl = document.getElementById('update-current-ver');
+  const newEl = document.getElementById('update-new-ver');
+  const titleEl = document.getElementById('update-release-title');
+  const notesEl = document.getElementById('update-release-notes');
+  const sizeEl = document.getElementById('update-asset-size');
+
+  if (curEl) curEl.innerText = `v${data.currentVersion}`;
+  if (newEl) newEl.innerText = `v${data.latestVersion.replace(/^v/, '')}`;
+  if (titleEl) titleEl.innerText = data.releaseName || `AntiGravity ${data.latestVersion}`;
+  if (notesEl) notesEl.innerText = data.releaseNotes || 'Bug fixes and performance improvements.';
+  if (sizeEl) sizeEl.innerText = data.assetSize || 'Release Package';
+
+  sfx.play('complete');
+  showModal(modalAppUpdate);
 }
 
 // Download IPC Event Hooks

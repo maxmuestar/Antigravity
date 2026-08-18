@@ -75,6 +75,18 @@
           <!-- Rendered dynamically -->
         </div>
       </div>
+
+      <!-- Sidebar App Version & Update Status -->
+      <div class="sidebar-version-footer">
+        <div class="version-label">
+          <i class="fa-solid fa-code-branch"></i>
+          <span id="app-version-label">v6.0.0</span>
+        </div>
+        <button class="check-update-btn" id="btn-check-update" title="Check for Updates on GitHub">
+          <i class="fa-solid fa-arrows-rotate" id="check-update-icon"></i>
+          <span>Check Updates</span>
+        </button>
+      </div>
     </aside>
 
     <!-- Main Content Area -->
@@ -499,6 +511,46 @@
           <i class="fa-solid fa-folder-open"></i> Open Data Folder
         </button>
         <button class="primary-btn" id="modal-btn-ok-antivirus">OK</button>
+      </div>
+    </div>
+
+    <!-- Modal: New Update Available -->
+    <div class="modal-content" id="modal-app-update">
+      <div class="modal-header">
+        <div class="modal-title-with-icon text-success">
+          <i class="fa-solid fa-sparkles"></i>
+          <h2>Update Available</h2>
+        </div>
+        <button class="modal-close-btn" onclick="closeActiveModal()" title="Close"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <div class="update-banner">
+          <div class="update-version-row">
+            <span class="update-badge-old" id="update-current-ver">v4.0.0</span>
+            <i class="fa-solid fa-arrow-right update-arrow"></i>
+            <span class="update-badge-new" id="update-new-ver">v5.0.0</span>
+          </div>
+          <h3 class="update-release-title" id="update-release-title">AntiGravity 5.0.0</h3>
+        </div>
+
+        <div class="update-changelog-card">
+          <div class="update-changelog-header">
+            <i class="fa-solid fa-file-lines"></i>
+            <span>Release Notes</span>
+          </div>
+          <div class="update-changelog-body" id="update-release-notes">
+            <!-- Release notes text -->
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="secondary-btn" onclick="closeActiveModal()">Later</button>
+        <button type="button" class="secondary-btn" id="btn-open-release-page">
+          <i class="fa-brands fa-github"></i> GitHub
+        </button>
+        <button type="button" class="primary-btn" id="btn-download-update">
+          <i class="fa-solid fa-cloud-arrow-down"></i> Download (<span id="update-asset-size">...</span>)
+        </button>
       </div>
     </div>
 
