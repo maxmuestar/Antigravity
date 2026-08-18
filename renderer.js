@@ -2076,7 +2076,8 @@ async function setupMinecraftHub() {
   });
 
   // Console Drawer Toggle
-  consoleToggle?.addEventListener('click', () => {
+  consoleToggle?.addEventListener('click', (e) => {
+    e.stopPropagation();
     const drawer = document.getElementById('mc-console-drawer');
     if (drawer) drawer.classList.toggle('collapsed');
   });

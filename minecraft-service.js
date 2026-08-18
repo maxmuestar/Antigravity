@@ -63,29 +63,88 @@ class MinecraftService {
   }
 
   async loginMicrosoft() {
-    try {
-      const msmc = require('msmc');
-      const auth = new msmc.Auth("select_account");
-      const xbox = await auth.launch("electron");
-      const token = await xbox.getMinecraft();
-      const mclcAuth = xbox.mclc();
+    return new Promise((resolve) => {
+      try {
+        const { BrowserWindow } = require('electron');
+        const msmc = require('msmc');
+        const auth = new msmc.Auth("select_account");
+        const authUrl = auth.createLink();
 
-      const profile = {
-        gamertag: token.profile?.name || 'Player',
-        uuid: token.profile?.id || '00000000-0000-0000-0000-000000000000',
-        skinUrl: token.profile?.id ? `https://crafatar.com/avatars/${token.profile.id}?overlay` : null,
-        token: mclcAuth,
-        rawProfile: token.profile,
-        isOffline: false,
-        lastLogin: new Date().toISOString()
-      };
+        console.log('[MC AUTH] Opening Microsoft login window:', authUrl);
 
-      this.saveProfile(profile);
-      return { success: true, profile };
-    } catch (err) {
-      console.error('[MC AUTH] Login error:', err);
-      return { success: false, error: err.message };
-    }
+        const loginWin = new BrowserWindow({
+          width: 520,
+          height: 680,
+          title: "Log in with Microsoft - Minecraft",
+          autoHideMenuBar: true,
+          alwaysOnTop: true,
+          resizable: true,
+          webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true
+          }
+        });
+
+        let finished = false;
+
+        const checkRedirect = async (url) => {
+          if (finished || !url) return;
+          if (url.startsWith('https://login.live.com/oauth20_desktop.srf')) {
+            finished = true;
+            try {
+              const parsedUrl = new URL(url);
+              const code = parsedUrl.searchParams.get('code');
+              const error = parsedUrl.searchParams.get('error');
+              const errorDesc = parsedUrl.searchParams.get('error_description');
+
+              try { loginWin.destroy(); } catch (e) {}
+
+              if (code) {
+                console.log('[MC AUTH] Authorization code received, logging in to Xbox & Minecraft...');
+                const xbox = await auth.login(code);
+                const token = await xbox.getMinecraft();
+                const mclcAuth = xbox.mclc();
+
+                const profile = {
+                  gamertag: token.profile?.name || 'Player',
+                  uuid: token.profile?.id || '00000000-0000-0000-0000-000000000000',
+                  skinUrl: token.profile?.id ? `https://crafatar.com/avatars/${token.profile.id}?overlay` : null,
+                  token: mclcAuth,
+                  rawProfile: token.profile,
+                  isOffline: false,
+                  lastLogin: new Date().toISOString()
+                };
+
+                this.saveProfile(profile);
+                return resolve({ success: true, profile });
+              } else {
+                return resolve({ success: false, error: errorDesc || error || 'Login cancelled by user' });
+              }
+            } catch (err) {
+              console.error('[MC AUTH] Token exchange failed:', err);
+              return resolve({ success: false, error: err.message });
+            }
+          }
+        };
+
+        loginWin.webContents.on('will-navigate', (e, url) => checkRedirect(url));
+        loginWin.webContents.on('will-redirect', (e, url) => checkRedirect(url));
+        loginWin.webContents.on('did-navigate', (e, url) => checkRedirect(url));
+        loginWin.webContents.on('did-finish-load', () => checkRedirect(loginWin.webContents.getURL()));
+
+        loginWin.on('close', () => {
+          if (!finished) {
+            finished = true;
+            resolve({ success: false, error: 'Login window closed' });
+          }
+        });
+
+        loginWin.loadURL(authUrl);
+      } catch (err) {
+        console.error('[MC AUTH] Login error:', err);
+        resolve({ success: false, error: err.message });
+      }
+    });
   }
 
   setOfflineProfile(username = 'Player') {
