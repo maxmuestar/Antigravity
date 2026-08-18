@@ -184,7 +184,7 @@ class MinecraftService {
 
       const headers = {
         'Accept': 'application/json',
-        'User-Agent': 'AntiGravity-Launcher/6.5.5',
+        'User-Agent': 'AntiGravity-Launcher/7.0.0',
         ...(options.headers || {})
       };
 
@@ -218,7 +218,7 @@ class MinecraftService {
 
   fetchJson(url) {
     return new Promise((resolve, reject) => {
-      https.get(url, { headers: { 'User-Agent': 'AntiGravity-Launcher/6.5.5' } }, (res) => {
+      https.get(url, { headers: { 'User-Agent': 'AntiGravity-Launcher/7.0.0' } }, (res) => {
         let data = '';
         res.on('data', chunk => data += chunk);
         res.on('end', () => {
