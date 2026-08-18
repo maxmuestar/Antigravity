@@ -304,7 +304,7 @@
       <!-- Minecraft Hub View -->
       <section class="content-tab" id="tab-minecraft">
         <div class="view-header mc-header">
-          <div>
+          <div class="mc-header-text">
             <div class="mc-kicker"><i class="fa-solid fa-cube"></i> MINECRAFT JAVA EDITION</div>
             <h1>Minecraft Launcher & Mod Center</h1>
             <p class="subtitle">Official Microsoft Account Login, Modrinth Mods, Shaders & 1-Click Launch.</p>
@@ -313,7 +313,8 @@
             <!-- Account Badge -->
             <div class="mc-account-card" id="mc-account-card">
               <div class="mc-account-avatar-wrapper">
-                <img id="mc-account-avatar" src="https://crafatar.com/avatars/steve?overlay" alt="Player Skin">
+                <img id="mc-account-avatar" src="https://crafatar.com/avatars/8667ba71-b85a-4004-af54-457a9734eed7?overlay" alt="Skin" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                <div class="mc-account-avatar-fallback" style="display: none;"><i class="fa-solid fa-cube text-success"></i></div>
               </div>
               <div class="mc-account-info">
                 <span class="mc-account-name" id="mc-account-name">Not Logged In</span>
@@ -334,7 +335,7 @@
           </div>
         </div>
 
-        <!-- Launch & Instance Configuration Showcase -->
+        <!-- Launch & Instance Configuration Showcase Bar -->
         <div class="mc-hero-launch-card">
           <div class="mc-hero-bg-glow"></div>
           <div class="mc-config-row">
@@ -448,8 +449,8 @@
           </div>
         </div>
 
-        <!-- Optional Collapsible Console Log Drawer -->
-        <div class="mc-console-drawer" id="mc-console-drawer">
+        <!-- Collapsible Console Log Drawer (Collapsed by default) -->
+        <div class="mc-console-drawer collapsed" id="mc-console-drawer">
           <div class="mc-console-header" id="mc-console-toggle">
             <div class="mc-console-title">
               <i class="fa-solid fa-terminal"></i>
