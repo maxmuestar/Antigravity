@@ -2477,9 +2477,11 @@ input:focus, select:focus {
   border: 1px solid rgba(16, 185, 129, 0.35);
   border-radius: var(--radius-xl);
   padding: 1.35rem 1.6rem;
-  margin-bottom: 1.75rem;
+  margin-bottom: 2rem;
   box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55), 0 0 35px rgba(16, 185, 129, 0.15);
-  min-height: 95px;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
   box-sizing: border-box;
 }
 
@@ -2493,11 +2495,78 @@ input:focus, select:focus {
   pointer-events: none;
 }
 
+/* Universal Dark Select Dropdown Theme */
+select,
+select option,
+select optgroup {
+  background-color: #120e1d !important;
+  color: #ffffff !important;
+}
+
+select option:hover,
+select option:focus,
+select option:checked {
+  background-color: #059669 !important;
+  color: #ffffff !important;
+}
+
+/* Instance Switcher Bar */
+.mc-instance-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-wrap: wrap;
+}
+
+.mc-instance-label-group {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1;
+  min-width: 260px;
+}
+
+.mc-instance-badge {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #10b981;
+  letter-spacing: 1px;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.mc-select-instance {
+  flex: 1;
+  max-width: 380px;
+  background: rgba(0, 0, 0, 0.75);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: #34d399;
+  font-weight: 700;
+  height: 38px;
+  padding: 0 0.85rem;
+  border-radius: var(--radius-md);
+  outline: none;
+  cursor: pointer;
+}
+
+.mc-instance-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .mc-config-row {
   display: grid;
-  grid-template-columns: 1fr 1fr 1.2fr auto;
+  grid-template-columns: 1fr 1.2fr 1.3fr auto;
   gap: 1.25rem;
   align-items: end;
+  width: 100%;
 }
 
 .mc-config-group {
@@ -2508,7 +2577,7 @@ input:focus, select:focus {
 }
 
 .mc-config-group label {
-  font-size: 0.76rem;
+  font-size: 0.74rem;
   font-weight: 800;
   color: #a7f3d0;
   display: flex;
@@ -2517,6 +2586,7 @@ input:focus, select:focus {
   text-transform: uppercase;
   letter-spacing: 0.6px;
   margin: 0;
+  white-space: nowrap;
 }
 
 .mc-select {
@@ -2528,7 +2598,7 @@ input:focus, select:focus {
   padding: 0 0.85rem;
   border-radius: var(--radius-md);
   font-family: inherit;
-  font-size: 0.88rem;
+  font-size: 0.86rem;
   font-weight: 600;
   outline: none;
   cursor: pointer;
@@ -2545,7 +2615,9 @@ input:focus, select:focus {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 16px;
+  gap: 0.5rem;
+  height: 18px;
+  white-space: nowrap;
 }
 
 .mc-ram-value {
@@ -2564,7 +2636,7 @@ input:focus, select:focus {
   cursor: pointer;
   width: 100%;
   height: 8px;
-  margin: 10px 0;
+  margin: 9px 0 0 0;
   display: block;
 }
 
@@ -2609,12 +2681,13 @@ input:focus, select:focus {
 }
 
 .mc-launch-progress-box {
-  margin-top: 1.25rem;
-  padding-top: 1rem;
+  margin-top: 0.35rem;
+  padding-top: 0.85rem;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  width: 100%;
 }
 
 .mc-launch-progress-info {

@@ -2243,14 +2243,41 @@ ipcMain.handle('mc-logout', () => {
   return minecraftService.logout();
 });
 
-ipcMain.handle('mc-get-config', () => {
-  if (!minecraftService) return {};
-  return minecraftService.getConfig();
+ipcMain.handle('mc-get-instances', () => {
+  if (!minecraftService) return { activeInstanceId: 'default-fabric', instances: [] };
+  return minecraftService.getInstances();
 });
 
-ipcMain.handle('mc-save-config', (event, config) => {
-  if (!minecraftService) return {};
-  return minecraftService.saveConfig(config);
+ipcMain.handle('mc-get-active-instance', () => {
+  if (!minecraftService) return null;
+  return minecraftService.getActiveInstance();
+});
+
+ipcMain.handle('mc-set-active-instance', (event, instanceId) => {
+  if (!minecraftService) return { success: false };
+  return minecraftService.setActiveInstance(instanceId);
+});
+
+ipcMain.handle('mc-create-instance', (event, instanceData) => {
+  if (!minecraftService) return { success: false };
+  return minecraftService.createInstance(instanceData || {});
+});
+
+ipcMain.handle('mc-update-instance', (event, { instanceId, updates }) => {
+  if (!minecraftService) return { success: false };
+  return minecraftService.updateInstance(instanceId, updates || {});
+});
+
+ipcMain.handle('mc-delete-instance', (event, instanceId) => {
+  if (!minecraftService) return { success: false };
+  return minecraftService.deleteInstance(instanceId);
+});
+
+ipcMain.handle('mc-install-modpack', async (event, { mrpackUrl, modpackName }) => {
+  if (!minecraftService) return { success: false, error: 'Service not initialized' };
+  return await minecraftService.installModpack(mrpackUrl, modpackName, (p) => {
+    mainWindow?.webContents.send('mc-modpack-progress', p);
+  });
 });
 
 ipcMain.handle('mc-get-versions', async () => {
@@ -2268,34 +2295,37 @@ ipcMain.handle('mc-get-project-versions', async (event, { projectId, loader, ver
   return await minecraftService.getModrinthProjectVersions(projectId, loader, version);
 });
 
-ipcMain.handle('mc-install-mod', async (event, { fileUrl, fileName, projectType }) => {
+ipcMain.handle('mc-install-mod', async (event, { fileUrl, fileName, projectType, instanceId }) => {
   if (!minecraftService) return { success: false, error: 'Service not initialized' };
-  return await minecraftService.installModFile(fileUrl, fileName, projectType, (p) => {
+  return await minecraftService.installModFile(fileUrl, fileName, projectType, instanceId, (p) => {
     mainWindow?.webContents.send('mc-mod-download-progress', { fileName, ...p });
   });
 });
 
-ipcMain.handle('mc-get-installed-mods', () => {
+ipcMain.handle('mc-get-installed-mods', (event, instanceId) => {
   if (!minecraftService) return [];
-  return minecraftService.getInstalledMods();
+  return minecraftService.getInstalledMods(instanceId);
 });
 
-ipcMain.handle('mc-toggle-mod', (event, { filename, enable }) => {
+ipcMain.handle('mc-toggle-mod', (event, { filename, enable, instanceId }) => {
   if (!minecraftService) return { success: false };
-  return minecraftService.toggleMod(filename, enable);
+  return minecraftService.toggleMod(filename, enable, instanceId);
 });
 
-ipcMain.handle('mc-delete-mod', (event, filename) => {
+ipcMain.handle('mc-delete-mod', (event, { filename, instanceId }) => {
   if (!minecraftService) return { success: false };
-  return minecraftService.deleteMod(filename);
+  return minecraftService.deleteMod(filename, instanceId);
 });
 
-ipcMain.handle('mc-open-folder', (event, folderType) => {
+ipcMain.handle('mc-open-folder', (event, { folderType, instanceId }) => {
   if (!minecraftService) return { success: false };
-  let target = minecraftService.mcDir;
-  if (folderType === 'mods') target = minecraftService.modsDir;
-  if (folderType === 'resourcepacks') target = minecraftService.resourcePacksDir;
-  if (folderType === 'shaderpacks') target = minecraftService.shaderPacksDir;
+  const instDir = minecraftService.getInstanceDir(instanceId);
+  let target = instDir;
+  if (folderType === 'mods') target = path.join(instDir, 'mods');
+  if (folderType === 'resourcepacks') target = path.join(instDir, 'resourcepacks');
+  if (folderType === 'shaderpacks') target = path.join(instDir, 'shaderpacks');
+  if (folderType === 'root') target = instDir;
+  if (folderType === 'global') target = minecraftService.mcDir;
   shell.openPath(target);
   return { success: true };
 });

@@ -2,24 +2,217 @@ const https = require('https');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
-const { URL } = require('url');
+const crypto = require('crypto');
+const { URL, URLSearchParams } = require('url');
+const AdmZip = require('adm-zip');
 
 class MinecraftService {
   constructor(userDataDir) {
     this.userDataDir = userDataDir;
     this.mcDir = path.join(userDataDir, 'minecraft');
-    this.modsDir = path.join(this.mcDir, 'mods');
-    this.resourcePacksDir = path.join(this.mcDir, 'resourcepacks');
-    this.shaderPacksDir = path.join(this.mcDir, 'shaderpacks');
+    this.instancesDir = path.join(this.mcDir, 'instances');
+    this.forgeDir = path.join(this.mcDir, 'forge-installers');
     this.profilePath = path.join(this.mcDir, 'profile.json');
-    this.configPath = path.join(this.mcDir, 'launcher-config.json');
+    this.instancesConfigPath = path.join(this.mcDir, 'instances.json');
 
     this.ensureDirs();
+    this.initDefaultInstance();
   }
 
   ensureDirs() {
-    [this.mcDir, this.modsDir, this.resourcePacksDir, this.shaderPacksDir].forEach(dir => {
+    [this.mcDir, this.instancesDir, this.forgeDir].forEach(dir => {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    });
+  }
+
+  initDefaultInstance() {
+    if (!fs.existsSync(this.instancesConfigPath)) {
+      const defaultId = 'default-fabric';
+      const defaultInstanceDir = path.join(this.instancesDir, defaultId);
+      ['mods', 'resourcepacks', 'shaderpacks', 'config', 'saves'].forEach(sub => {
+        const p = path.join(defaultInstanceDir, sub);
+        if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+      });
+
+      const initialData = {
+        activeInstanceId: defaultId,
+        instances: [
+          {
+            id: defaultId,
+            name: 'Fabric 1.20.1 (Default)',
+            version: '1.20.1',
+            loader: 'fabric',
+            ramMin: 2,
+            ramMax: 4,
+            icon: 'cube',
+            created: new Date().toISOString()
+          }
+        ]
+      };
+      fs.writeFileSync(this.instancesConfigPath, JSON.stringify(initialData, null, 2), 'utf-8');
+    }
+  }
+
+  getInstancesData() {
+    try {
+      if (fs.existsSync(this.instancesConfigPath)) {
+        return JSON.parse(fs.readFileSync(this.instancesConfigPath, 'utf-8'));
+      }
+    } catch (e) {
+      console.warn('Failed to read instances data:', e);
+    }
+    return { activeInstanceId: 'default-fabric', instances: [] };
+  }
+
+  saveInstancesData(data) {
+    fs.writeFileSync(this.instancesConfigPath, JSON.stringify(data, null, 2), 'utf-8');
+    return data;
+  }
+
+  getInstances() {
+    return this.getInstancesData();
+  }
+
+  getActiveInstance() {
+    const data = this.getInstancesData();
+    let inst = data.instances.find(i => i.id === data.activeInstanceId);
+    if (!inst && data.instances.length > 0) {
+      inst = data.instances[0];
+      data.activeInstanceId = inst.id;
+      this.saveInstancesData(data);
+    }
+    return inst || {
+      id: 'default-fabric',
+      name: 'Fabric 1.20.1 (Default)',
+      version: '1.20.1',
+      loader: 'fabric',
+      ramMin: 2,
+      ramMax: 4,
+      icon: 'cube'
+    };
+  }
+
+  setActiveInstance(instanceId) {
+    const data = this.getInstancesData();
+    const exists = data.instances.some(i => i.id === instanceId);
+    if (exists) {
+      data.activeInstanceId = instanceId;
+      this.saveInstancesData(data);
+      return { success: true, activeInstance: this.getActiveInstance() };
+    }
+    return { success: false, error: 'Instance not found' };
+  }
+
+  createInstance({ name, version = '1.20.1', loader = 'fabric', ramMin = 2, ramMax = 4, icon = 'cube' }) {
+    const data = this.getInstancesData();
+    const slug = (name || 'instance').toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+    let id = `${slug}-${Date.now().toString(36)}`;
+
+    const instanceDir = path.join(this.instancesDir, id);
+    ['mods', 'resourcepacks', 'shaderpacks', 'config', 'saves'].forEach(sub => {
+      const p = path.join(instanceDir, sub);
+      if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+    });
+
+    const newInstance = {
+      id,
+      name: name || `Minecraft ${version}`,
+      version,
+      loader,
+      ramMin: parseInt(ramMin, 10) || 2,
+      ramMax: parseInt(ramMax, 10) || 4,
+      icon: icon || 'cube',
+      created: new Date().toISOString()
+    };
+
+    data.instances.push(newInstance);
+    data.activeInstanceId = id;
+    this.saveInstancesData(data);
+
+    return { success: true, instance: newInstance, instances: data.instances };
+  }
+
+  updateInstance(instanceId, updates) {
+    const data = this.getInstancesData();
+    const idx = data.instances.findIndex(i => i.id === instanceId);
+    if (idx !== -1) {
+      data.instances[idx] = { ...data.instances[idx], ...updates };
+      this.saveInstancesData(data);
+      return { success: true, instance: data.instances[idx] };
+    }
+    return { success: false, error: 'Instance not found' };
+  }
+
+  deleteInstance(instanceId) {
+    const data = this.getInstancesData();
+    if (data.instances.length <= 1) {
+      return { success: false, error: 'Cannot delete the only remaining instance.' };
+    }
+
+    data.instances = data.instances.filter(i => i.id !== instanceId);
+    if (data.activeInstanceId === instanceId) {
+      data.activeInstanceId = data.instances[0].id;
+    }
+    this.saveInstancesData(data);
+
+    const instanceDir = path.join(this.instancesDir, instanceId);
+    if (fs.existsSync(instanceDir)) {
+      try {
+        fs.rmSync(instanceDir, { recursive: true, force: true });
+      } catch (e) {
+        console.warn('Failed to remove instance directory:', e);
+      }
+    }
+
+    return { success: true, activeInstanceId: data.activeInstanceId, instances: data.instances };
+  }
+
+  getInstanceDir(instanceId) {
+    const active = instanceId || this.getActiveInstance().id;
+    const dir = path.join(this.instancesDir, active);
+    ['mods', 'resourcepacks', 'shaderpacks', 'config', 'saves'].forEach(sub => {
+      const p = path.join(dir, sub);
+      if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+    });
+    return dir;
+  }
+
+  requestJson(url, options = {}) {
+    return new Promise((resolve, reject) => {
+      const parsed = new URL(url);
+      const postData = options.body ? (typeof options.body === 'string' ? options.body : JSON.stringify(options.body)) : null;
+
+      const headers = {
+        'Accept': 'application/json',
+        'User-Agent': 'AntiGravity-Launcher/6.5.5',
+        ...(options.headers || {})
+      };
+
+      if (postData) {
+        if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
+        headers['Content-Length'] = Buffer.byteLength(postData);
+      }
+
+      const req = https.request({
+        hostname: parsed.hostname,
+        path: parsed.pathname + parsed.search,
+        method: options.method || (postData ? 'POST' : 'GET'),
+        headers
+      }, (res) => {
+        let buf = '';
+        res.on('data', chunk => buf += chunk);
+        res.on('end', () => {
+          try {
+            resolve({ status: res.statusCode, data: JSON.parse(buf) });
+          } catch (e) {
+            resolve({ status: res.statusCode, raw: buf });
+          }
+        });
+      });
+
+      req.on('error', reject);
+      if (postData) req.write(postData);
+      req.end();
     });
   }
 
@@ -62,13 +255,137 @@ class MinecraftService {
     return { success: true };
   }
 
+  async exchangeMicrosoftAuth(code) {
+    console.log('[MC AUTH] Step 1: Exchanging code for Microsoft OAuth tokens...');
+    const tokenParams = new URLSearchParams({
+      client_id: '00000000402b5328',
+      code: code,
+      grant_type: 'authorization_code',
+      redirect_uri: 'https://login.live.com/oauth20_desktop.srf',
+      scope: 'XboxLive.signin offline_access'
+    }).toString();
+
+    const msTokenRes = await this.requestJson('https://login.live.com/oauth20_token.srf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: tokenParams
+    });
+
+    if (msTokenRes.status !== 200 || !msTokenRes.data?.access_token) {
+      throw new Error(msTokenRes.data?.error_description || 'Failed to obtain Microsoft token');
+    }
+    const msAccessToken = msTokenRes.data.access_token;
+    const msRefreshToken = msTokenRes.data.refresh_token;
+
+    console.log('[MC AUTH] Step 2: Authenticating with Xbox Live (XBL)...');
+    const xblRes = await this.requestJson('https://user.auth.xboxlive.com/user/authenticate', {
+      method: 'POST',
+      body: {
+        Properties: {
+          AuthMethod: 'RPS',
+          SiteName: 'user.auth.xboxlive.com',
+          RpsTicket: `d=${msAccessToken}`
+        },
+        RelyingParty: 'http://auth.xboxlive.com',
+        TokenType: 'JWT'
+      }
+    });
+
+    if (xblRes.status !== 200 || !xblRes.data?.Token) {
+      throw new Error('Failed to authenticate with Xbox Live');
+    }
+    const xblToken = xblRes.data.Token;
+    const userHash = xblRes.data.DisplayClaims?.xui?.[0]?.uhs;
+    const gamertagFromXbl = xblRes.data.DisplayClaims?.xui?.[0]?.gtg;
+
+    console.log('[MC AUTH] Step 3: Acquiring XSTS token for Minecraft Services...');
+    const xstsRes = await this.requestJson('https://xsts.auth.xboxlive.com/xsts/authorize', {
+      method: 'POST',
+      body: {
+        Properties: {
+          SandboxId: 'RETAIL',
+          UserTokens: [xblToken]
+        },
+        RelyingParty: 'rp://api.minecraftservices.com/',
+        TokenType: 'JWT'
+      }
+    });
+
+    if (xstsRes.status !== 200 || !xstsRes.data?.Token) {
+      if (xstsRes.data?.XErr === 2148916238) {
+        throw new Error('This Microsoft account is under 18 and requires family settings approval.');
+      }
+      throw new Error('Failed to acquire XSTS security token for Minecraft');
+    }
+    const xstsToken = xstsRes.data.Token;
+    const xstsUserHash = xstsRes.data.DisplayClaims?.xui?.[0]?.uhs || userHash;
+
+    console.log('[MC AUTH] Step 4: Logging in to Minecraft Services...');
+    const mcLoginRes = await this.requestJson('https://api.minecraftservices.com/authentication/login_with_xbox', {
+      method: 'POST',
+      body: {
+        identityToken: `XBL3.0 x=${xstsUserHash};${xstsToken}`
+      }
+    });
+
+    if (mcLoginRes.status !== 200 || !mcLoginRes.data?.access_token) {
+      throw new Error('Failed to login to Minecraft Services with Xbox token');
+    }
+    const mcAccessToken = mcLoginRes.data.access_token;
+
+    console.log('[MC AUTH] Step 5: Fetching official Minecraft Java Profile...');
+    const profileRes = await this.requestJson('https://api.minecraftservices.com/minecraft/profile', {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${mcAccessToken}`
+      }
+    });
+
+    let playerName = gamertagFromXbl || 'Player';
+    let playerUuid = '00000000-0000-0000-0000-000000000000';
+    let skinUrl = `https://crafatar.com/avatars/${playerName}?overlay`;
+
+    if (profileRes.status === 200 && profileRes.data?.name) {
+      playerName = profileRes.data.name;
+      playerUuid = profileRes.data.id;
+      skinUrl = `https://crafatar.com/avatars/${playerUuid}?overlay`;
+      console.log(`[MC AUTH] Found Minecraft Java Profile: ${playerName} (${playerUuid})`);
+    } else {
+      console.log(`[MC AUTH] Using Xbox Gamertag: ${playerName}`);
+    }
+
+    const mclcAuth = {
+      access_token: mcAccessToken,
+      client_token: crypto.randomUUID(),
+      uuid: playerUuid,
+      name: playerName,
+      meta: {
+        xuid: xstsUserHash,
+        type: 'msa',
+        demo: false,
+        refresh_token: msRefreshToken
+      },
+      user_properties: {}
+    };
+
+    const profile = {
+      gamertag: playerName,
+      uuid: playerUuid,
+      skinUrl: skinUrl,
+      token: mclcAuth,
+      isOffline: false,
+      lastLogin: new Date().toISOString()
+    };
+
+    this.saveProfile(profile);
+    return profile;
+  }
+
   async loginMicrosoft() {
     return new Promise((resolve) => {
       try {
         const { BrowserWindow } = require('electron');
-        const msmc = require('msmc');
-        const auth = new msmc.Auth("select_account");
-        const authUrl = auth.createLink();
+        const authUrl = 'https://login.live.com/oauth20_authorize.srf?client_id=00000000402b5328&response_type=code&redirect_uri=https%3A%2F%2Flogin.live.com%2Foauth20_desktop.srf&scope=XboxLive.signin%20offline_access&prompt=select_account&mkt=en-US';
 
         console.log('[MC AUTH] Opening Microsoft login window:', authUrl);
 
@@ -102,41 +419,8 @@ class MinecraftService {
               try { loginWin.destroy(); } catch (e) {}
 
               if (code) {
-                console.log('[MC AUTH] Authorization code received! Logging in to Xbox Live...');
-                const xbox = await auth.login(code);
-                console.log('[MC AUTH] Xbox Live login complete! Fetching Minecraft profile...');
-                
-                try {
-                  const token = await xbox.getMinecraft();
-                  const mclcAuth = xbox.mclc();
-
-                  const profile = {
-                    gamertag: token.profile?.name || 'Player',
-                    uuid: token.profile?.id || '00000000-0000-0000-0000-000000000000',
-                    skinUrl: token.profile?.id ? `https://crafatar.com/avatars/${token.profile.id}?overlay` : null,
-                    token: mclcAuth,
-                    rawProfile: token.profile,
-                    isOffline: false,
-                    lastLogin: new Date().toISOString()
-                  };
-
-                  this.saveProfile(profile);
-                  console.log('[MC AUTH] Successfully logged in as:', profile.gamertag);
-                  return resolve({ success: true, profile });
-                } catch (mcErr) {
-                  console.warn('[MC AUTH] Minecraft profile fetch exception, building Xbox profile:', mcErr);
-                  const mclcAuth = typeof xbox.mclc === 'function' ? xbox.mclc() : null;
-                  const profile = {
-                    gamertag: xbox.xPlayer?.name || 'Player',
-                    uuid: xbox.xPlayer?.id || '00000000-0000-0000-0000-000000000000',
-                    skinUrl: 'https://crafatar.com/avatars/steve?overlay',
-                    token: mclcAuth,
-                    isOffline: false,
-                    lastLogin: new Date().toISOString()
-                  };
-                  this.saveProfile(profile);
-                  return resolve({ success: true, profile });
-                }
+                const profile = await this.exchangeMicrosoftAuth(code);
+                return resolve({ success: true, profile });
               } else {
                 return resolve({ success: false, error: errorDesc || error || 'Login cancelled by user' });
               }
@@ -183,56 +467,64 @@ class MinecraftService {
     return { success: true, profile };
   }
 
-  getConfig() {
-    const defaults = {
-      version: '1.20.1',
-      loader: 'fabric',
-      ramMin: 2,
-      ramMax: 4,
-      customJavaPath: ''
-    };
-    try {
-      if (fs.existsSync(this.configPath)) {
-        return { ...defaults, ...JSON.parse(fs.readFileSync(this.configPath, 'utf-8')) };
-      }
-    } catch (e) {}
-    return defaults;
-  }
-
-  saveConfig(config) {
-    fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2), 'utf-8');
-    return config;
-  }
-
-  async getVersions() {
-    try {
-      const manifest = await this.fetchJson('https://launchermeta.mojang.com/mc/game/version_manifest_v2.json');
-      const releases = manifest.versions
-        .filter(v => v.type === 'release')
-        .map(v => ({ id: v.id, type: v.type, releaseTime: v.releaseTime }));
-      return { success: true, latest: manifest.latest, versions: releases.slice(0, 40) };
-    } catch (err) {
-      return { success: false, error: err.message, versions: this.getFallbackVersions() };
-    }
-  }
-
-  getFallbackVersions() {
-    return [
-      { id: '1.21.1', type: 'release' },
-      { id: '1.21', type: 'release' },
-      { id: '1.20.6', type: 'release' },
-      { id: '1.20.4', type: 'release' },
-      { id: '1.20.1', type: 'release' },
-      { id: '1.19.4', type: 'release' },
-      { id: '1.18.2', type: 'release' },
-      { id: '1.16.5', type: 'release' },
-      { id: '1.12.2', type: 'release' },
-      { id: '1.8.9', type: 'release' },
-      { id: '1.7.10', type: 'release' }
+  findInstalledJavaRuntimes() {
+    const runtimes = [];
+    const searchDirs = [
+      'C:\\Program Files\\Java',
+      'C:\\Program Files\\Eclipse Adoptium',
+      'C:\\Program Files\\Microsoft',
+      'C:\\Program Files\\BellSoft',
+      'C:\\Program Files\\Amazon Corretto',
+      path.join(process.env.APPDATA || '', '.minecraft', 'runtime'),
+      path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Eclipse Adoptium')
     ];
+
+    searchDirs.forEach(baseDir => {
+      if (fs.existsSync(baseDir)) {
+        try {
+          const subdirs = fs.readdirSync(baseDir);
+          subdirs.forEach(sub => {
+            const fullPath = path.join(baseDir, sub);
+            const javawExe = path.join(fullPath, 'bin', 'javaw.exe');
+            const javaExe = path.join(fullPath, 'bin', 'java.exe');
+            [javawExe, javaExe].forEach(exe => {
+              if (fs.existsSync(exe)) {
+                runtimes.push({ name: sub, path: exe });
+              }
+            });
+          });
+        } catch (e) {}
+      }
+    });
+
+    return runtimes;
   }
 
-  async prepareLoader(loader, gameVersion) {
+  resolveJavaPath(mcVersion) {
+    const runtimes = this.findInstalledJavaRuntimes();
+    if (runtimes.length === 0) return null;
+
+    const vParts = (mcVersion || '1.20.1').split('.').map(p => parseInt(p, 10));
+    const minor = vParts[1] || 20;
+    const patch = vParts[2] || 0;
+
+    let targetMajor = '17';
+    if (minor >= 21 || (minor === 20 && patch >= 5)) {
+      targetMajor = '21';
+    } else if (minor === 17) {
+      targetMajor = '16';
+    } else if (minor <= 16) {
+      targetMajor = '8';
+    }
+
+    const exactMatch = runtimes.find(r => r.name.includes(targetMajor) || r.path.includes(targetMajor));
+    if (exactMatch) return exactMatch.path;
+
+    const javaw = runtimes.find(r => r.path.endsWith('javaw.exe'));
+    return javaw ? javaw.path : runtimes[0].path;
+  }
+
+  async prepareLoader(loader, gameVersion, instanceDir) {
     if (!loader || loader === 'vanilla') return null;
 
     try {
@@ -247,15 +539,23 @@ class MinecraftService {
         const profileJson = await this.fetchJson(`https://meta.fabricmc.net/v2/versions/loader/${encodeURIComponent(gameVersion)}/${encodeURIComponent(loaderVer)}/profile/json`);
         const versionId = profileJson.id || `fabric-loader-${loaderVer}-${gameVersion}`;
 
+        // Save to global mcDir/versions
         const versionDir = path.join(this.mcDir, 'versions', versionId);
         if (!fs.existsSync(versionDir)) {
           fs.mkdirSync(versionDir, { recursive: true });
         }
-
         const versionJsonPath = path.join(versionDir, `${versionId}.json`);
         fs.writeFileSync(versionJsonPath, JSON.stringify(profileJson, null, 2), 'utf-8');
+
+        // Save to instanceDir/versions
+        if (instanceDir) {
+          const instVerDir = path.join(instanceDir, 'versions', versionId);
+          if (!fs.existsSync(instVerDir)) fs.mkdirSync(instVerDir, { recursive: true });
+          fs.writeFileSync(path.join(instVerDir, `${versionId}.json`), JSON.stringify(profileJson, null, 2), 'utf-8');
+        }
+
         console.log(`[MC LOADER] Installed Fabric version JSON: ${versionJsonPath}`);
-        return versionId;
+        return { type: 'custom', customVersionId: versionId };
       }
 
       if (loader === 'quilt') {
@@ -273,11 +573,58 @@ class MinecraftService {
         if (!fs.existsSync(versionDir)) {
           fs.mkdirSync(versionDir, { recursive: true });
         }
-
         const versionJsonPath = path.join(versionDir, `${versionId}.json`);
         fs.writeFileSync(versionJsonPath, JSON.stringify(profileJson, null, 2), 'utf-8');
+
+        if (instanceDir) {
+          const instVerDir = path.join(instanceDir, 'versions', versionId);
+          if (!fs.existsSync(instVerDir)) fs.mkdirSync(instVerDir, { recursive: true });
+          fs.writeFileSync(path.join(instVerDir, `${versionId}.json`), JSON.stringify(profileJson, null, 2), 'utf-8');
+        }
+
         console.log(`[MC LOADER] Installed Quilt version JSON: ${versionJsonPath}`);
-        return versionId;
+        return { type: 'custom', customVersionId: versionId };
+      }
+
+      if (loader === 'forge') {
+        console.log(`[MC LOADER] Preparing Forge for Minecraft ${gameVersion}...`);
+        const promos = await this.fetchJson('https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json');
+        const promoVer = promos.promos?.[`${gameVersion}-recommended`] || promos.promos?.[`${gameVersion}-latest`];
+
+        if (!promoVer) {
+          throw new Error(`No Forge build found for Minecraft version ${gameVersion}.`);
+        }
+
+        const installerFileName = `forge-${gameVersion}-${promoVer}-installer.jar`;
+        const localInstallerPath = path.join(this.forgeDir, installerFileName);
+
+        if (!fs.existsSync(localInstallerPath)) {
+          const downloadUrl = `https://maven.minecraftforge.net/net/minecraftforge/forge/${gameVersion}-${promoVer}/${installerFileName}`;
+          console.log(`[MC LOADER] Downloading Forge installer: ${downloadUrl}`);
+          await this.downloadFileWithRedirects(downloadUrl, localInstallerPath);
+        }
+
+        console.log(`[MC LOADER] Forge installer ready: ${localInstallerPath}`);
+        return { type: 'forge', installerPath: localInstallerPath };
+      }
+
+      if (loader === 'neoforge') {
+        console.log(`[MC LOADER] Preparing NeoForge for Minecraft ${gameVersion}...`);
+        const releasesManifest = await this.fetchJson('https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge');
+        const versions = releasesManifest.versions || [];
+        const matching = versions.filter(v => v.startsWith(gameVersion) || v.startsWith(gameVersion.replace('1.', '')));
+        const latestNeo = matching.pop() || versions[versions.length - 1];
+
+        if (latestNeo) {
+          const installerFileName = `neoforge-${latestNeo}-installer.jar`;
+          const localInstallerPath = path.join(this.forgeDir, installerFileName);
+          if (!fs.existsSync(localInstallerPath)) {
+            const downloadUrl = `https://maven.neoforged.net/releases/net/neoforged/neoforge/${latestNeo}/${installerFileName}`;
+            console.log(`[MC LOADER] Downloading NeoForge installer: ${downloadUrl}`);
+            await this.downloadFileWithRedirects(downloadUrl, localInstallerPath);
+          }
+          return { type: 'forge', installerPath: localInstallerPath };
+        }
       }
     } catch (err) {
       console.error('[MC LOADER] Failed to prepare loader:', err);
@@ -294,7 +641,7 @@ class MinecraftService {
     if (loader && loader !== 'vanilla' && projectType === 'mod') {
       facets.push(`["categories:${loader}"]`);
     }
-    if (version) {
+    if (version && projectType !== 'modpack') {
       facets.push(`["versions:${version}"]`);
     }
 
@@ -318,7 +665,6 @@ class MinecraftService {
       console.warn('Initial project versions lookup failed, trying fallback:', e.message);
     }
 
-    // Fallback without strict loader filtering if none found
     try {
       let fallbackUrl = `https://api.modrinth.com/v2/project/${encodeURIComponent(projectId)}/version`;
       if (version) fallbackUrl += `?game_versions=["${version}"]`;
@@ -331,6 +677,9 @@ class MinecraftService {
 
   downloadFileWithRedirects(fileUrl, destPath, onProgress) {
     return new Promise((resolve, reject) => {
+      const parentDir = path.dirname(destPath);
+      if (!fs.existsSync(parentDir)) fs.mkdirSync(parentDir, { recursive: true });
+
       function requestUrl(currentUrl, redirects = 0) {
         if (redirects > 8) return reject(new Error('Too many redirects'));
         const parsed = new URL(currentUrl);
@@ -376,26 +725,110 @@ class MinecraftService {
     });
   }
 
-  async installModFile(fileUrl, fileName, projectType = 'mod', onProgress) {
-    this.ensureDirs();
-    let targetDir = this.modsDir;
-    if (projectType === 'resourcepack') targetDir = this.resourcePacksDir;
-    if (projectType === 'shader') targetDir = this.shaderPacksDir;
+  async installModFile(fileUrl, fileName, projectType = 'mod', instanceId, onProgress) {
+    const instDir = this.getInstanceDir(instanceId);
+    let targetDir = path.join(instDir, 'mods');
+    if (projectType === 'resourcepack') targetDir = path.join(instDir, 'resourcepacks');
+    if (projectType === 'shader') targetDir = path.join(instDir, 'shaderpacks');
+
+    if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
 
     const destPath = path.join(targetDir, fileName);
     await this.downloadFileWithRedirects(fileUrl, destPath, onProgress);
     return { success: true, destPath, fileName };
   }
 
-  getInstalledMods() {
-    this.ensureDirs();
-    if (!fs.existsSync(this.modsDir)) return [];
+  async installModpack(mrpackUrl, modpackName, onProgress) {
+    const tempDir = path.join(this.mcDir, 'temp');
+    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
-    const files = fs.readdirSync(this.modsDir);
+    const tempMrpackPath = path.join(tempDir, `pack_${Date.now()}.mrpack`);
+
+    try {
+      if (onProgress) onProgress({ phase: 'downloading_pack', text: 'Downloading Modpack archive...', percent: 10 });
+      await this.downloadFileWithRedirects(mrpackUrl, tempMrpackPath);
+
+      if (onProgress) onProgress({ phase: 'extracting_pack', text: 'Extracting Modpack manifest...', percent: 30 });
+      const zip = new AdmZip(tempMrpackPath);
+      const indexEntry = zip.getEntry('modrinth.index.json');
+      if (!indexEntry) {
+        throw new Error('Invalid .mrpack file: missing modrinth.index.json');
+      }
+
+      const indexData = JSON.parse(zip.readAsText(indexEntry));
+      const gameVersion = indexData.dependencies?.minecraft || '1.20.1';
+      let loader = 'fabric';
+      if (indexData.dependencies?.['fabric-loader']) loader = 'fabric';
+      else if (indexData.dependencies?.['forge']) loader = 'forge';
+      else if (indexData.dependencies?.['neoforge']) loader = 'neoforge';
+      else if (indexData.dependencies?.['quilt-loader']) loader = 'quilt';
+
+      const finalName = indexData.name || modpackName || 'Modpack Instance';
+      const createRes = this.createInstance({
+        name: finalName,
+        version: gameVersion,
+        loader,
+        ramMin: 2,
+        ramMax: 6,
+        icon: 'box-open'
+      });
+
+      const instance = createRes.instance;
+      const instanceDir = this.getInstanceDir(instance.id);
+
+      // Extract overrides
+      const entries = zip.getEntries();
+      entries.forEach(entry => {
+        if (entry.entryName.startsWith('overrides/') && !entry.isDirectory) {
+          const relativePath = entry.entryName.replace(/^overrides\//, '');
+          const dest = path.join(instanceDir, relativePath);
+          const destDir = path.dirname(dest);
+          if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+          fs.writeFileSync(dest, entry.getData());
+        }
+      });
+
+      // Download mod files
+      const filesToDownload = (indexData.files || []).filter(f => !f.env || f.env.client !== 'unsupported');
+      const totalMods = filesToDownload.length;
+
+      for (let i = 0; i < totalMods; i++) {
+        const file = filesToDownload[i];
+        const dest = path.join(instanceDir, file.path);
+        const downloadUrl = file.downloads?.[0];
+
+        if (downloadUrl) {
+          const percent = 30 + Math.round(((i + 1) / totalMods) * 65);
+          if (onProgress) onProgress({
+            phase: 'downloading_mods',
+            text: `Downloading mods (${i + 1}/${totalMods}): ${path.basename(file.path)}`,
+            percent
+          });
+          await this.downloadFileWithRedirects(downloadUrl, dest);
+        }
+      }
+
+      try { fs.unlinkSync(tempMrpackPath); } catch (e) {}
+
+      if (onProgress) onProgress({ phase: 'complete', text: 'Modpack ready to play!', percent: 100 });
+      return { success: true, instance };
+    } catch (err) {
+      try { if (fs.existsSync(tempMrpackPath)) fs.unlinkSync(tempMrpackPath); } catch (e) {}
+      console.error('[MC MODPACK] Installation failed:', err);
+      return { success: false, error: err.message };
+    }
+  }
+
+  getInstalledMods(instanceId) {
+    const instDir = this.getInstanceDir(instanceId);
+    const modsDir = path.join(instDir, 'mods');
+    if (!fs.existsSync(modsDir)) return [];
+
+    const files = fs.readdirSync(modsDir);
     return files
       .filter(f => f.endsWith('.jar') || f.endsWith('.jar.disabled') || f.endsWith('.zip') || f.endsWith('.mrpack'))
       .map(file => {
-        const fullPath = path.join(this.modsDir, file);
+        const fullPath = path.join(modsDir, file);
         const stats = fs.statSync(fullPath);
         const isEnabled = !file.endsWith('.disabled');
         const cleanName = file.replace(/\.disabled$/, '');
@@ -411,8 +844,10 @@ class MinecraftService {
       });
   }
 
-  toggleMod(filename, enable) {
-    const currentPath = path.join(this.modsDir, filename);
+  toggleMod(filename, enable, instanceId) {
+    const instDir = this.getInstanceDir(instanceId);
+    const modsDir = path.join(instDir, 'mods');
+    const currentPath = path.join(modsDir, filename);
     if (!fs.existsSync(currentPath)) return { success: false, error: 'File not found' };
 
     let targetFilename;
@@ -424,13 +859,14 @@ class MinecraftService {
       return { success: true, filename };
     }
 
-    const targetPath = path.join(this.modsDir, targetFilename);
+    const targetPath = path.join(modsDir, targetFilename);
     fs.renameSync(currentPath, targetPath);
     return { success: true, filename: targetFilename, enabled: enable };
   }
 
-  deleteMod(filename) {
-    const filePath = path.join(this.modsDir, filename);
+  deleteMod(filename, instanceId) {
+    const instDir = this.getInstanceDir(instanceId);
+    const filePath = path.join(instDir, 'mods', filename);
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
       return { success: true };
@@ -438,47 +874,106 @@ class MinecraftService {
     return { success: false, error: 'File not found' };
   }
 
-  async launchGame({ version = '1.20.1', loader = 'fabric', ramMin = 2, ramMax = 4, customJavaPath = '' }, onProgress, onLog, onClose) {
+  async getVersions() {
     try {
-      const { Client, Authenticator } = require('minecraft-launcher-core');
+      const manifest = await this.fetchJson('https://launchermeta.mojang.com/mc/game/version_manifest_v2.json');
+      const releases = manifest.versions
+        .filter(v => v.type === 'release')
+        .map(v => ({ id: v.id, type: v.type, releaseTime: v.releaseTime }));
+      return { success: true, latest: manifest.latest, versions: releases.slice(0, 50) };
+    } catch (err) {
+      return { success: false, error: err.message, versions: this.getFallbackVersions() };
+    }
+  }
+
+  getFallbackVersions() {
+    return [
+      { id: '1.21.1', type: 'release' },
+      { id: '1.21', type: 'release' },
+      { id: '1.20.6', type: 'release' },
+      { id: '1.20.4', type: 'release' },
+      { id: '1.20.2', type: 'release' },
+      { id: '1.20.1', type: 'release' },
+      { id: '1.19.4', type: 'release' },
+      { id: '1.19.2', type: 'release' },
+      { id: '1.18.2', type: 'release' },
+      { id: '1.17.1', type: 'release' },
+      { id: '1.16.5', type: 'release' },
+      { id: '1.15.2', type: 'release' },
+      { id: '1.14.4', type: 'release' },
+      { id: '1.12.2', type: 'release' },
+      { id: '1.8.9', type: 'release' },
+      { id: '1.7.10', type: 'release' }
+    ];
+  }
+
+  async launchGame({ instanceId, version, loader, ramMin, ramMax, customJavaPath }, onProgress, onLog, onClose) {
+    try {
+      const { Client } = require('minecraft-launcher-core');
       const launcher = new Client();
       let profile = this.getProfile();
 
       if (!profile || !profile.token) {
-        // Fallback to offline player
-        profile = this.setOfflineProfile('Steve').profile;
+        profile = this.setOfflineProfile('Player').profile;
       }
+
+      const activeInst = this.getActiveInstance();
+      const instId = instanceId || activeInst.id;
+      const instVersion = version || activeInst.version || '1.20.1';
+      const instLoader = loader || activeInst.loader || 'fabric';
+      const instRamMin = ramMin || activeInst.ramMin || 2;
+      const instRamMax = ramMax || activeInst.ramMax || 4;
+
+      const instanceDir = this.getInstanceDir(instId);
+      const resolvedJava = customJavaPath || this.resolveJavaPath(instVersion);
 
       const launchOpts = {
         clientPackage: null,
         authorization: profile.token,
         root: this.mcDir,
+        overrides: {
+          gameDirectory: instanceDir,
+          cwd: instanceDir
+        },
         version: {
-          number: version,
+          number: instVersion,
           type: "release"
         },
         memory: {
-          max: `${ramMax || 4}G`,
-          min: `${ramMin || 2}G`
+          max: `${instRamMax}G`,
+          min: `${instRamMin}G`
         }
       };
 
-      if (customJavaPath && fs.existsSync(customJavaPath)) {
-        launchOpts.javaPath = customJavaPath;
+      if (resolvedJava && fs.existsSync(resolvedJava)) {
+        launchOpts.javaPath = resolvedJava;
+        console.log(`[MC LAUNCH] Using resolved Java executable: ${resolvedJava}`);
       }
 
-      if (loader && loader !== 'vanilla') {
-        const customVersionId = await this.prepareLoader(loader, version);
-        if (customVersionId) {
-          launchOpts.version.custom = customVersionId;
+      if (instLoader && instLoader !== 'vanilla') {
+        if (onProgress) onProgress({ type: 'loader', task: `Preparing ${instLoader} loader...`, percent: 15 });
+        const loaderRes = await this.prepareLoader(instLoader, instVersion, instanceDir);
+        if (loaderRes) {
+          if (loaderRes.type === 'forge') {
+            launchOpts.forge = loaderRes.installerPath;
+            console.log(`[MC LAUNCH] Configured Forge installer: ${loaderRes.installerPath}`);
+          } else if (loaderRes.type === 'custom') {
+            launchOpts.version.custom = loaderRes.customVersionId;
+            console.log(`[MC LAUNCH] Configured Custom Loader: ${loaderRes.customVersionId}`);
+          }
         }
       }
 
       console.log('[MC LAUNCH] Starting launch with opts:', {
+        instance: activeInst.name,
+        instanceRoot: instanceDir,
+        mcRoot: this.mcDir,
         version: launchOpts.version,
+        forge: launchOpts.forge,
         memory: launchOpts.memory,
-        root: launchOpts.root,
-        user: profile.gamertag
+        user: profile.gamertag,
+        isOffline: profile.isOffline,
+        java: launchOpts.javaPath
       });
 
       launcher.on('debug', (e) => {
@@ -514,7 +1009,7 @@ class MinecraftService {
       });
 
       await launcher.launch(launchOpts);
-      return { success: true };
+      return { success: true, instanceName: activeInst.name };
     } catch (err) {
       console.error('[MC LAUNCH] Launch failed:', err);
       return { success: false, error: err.message };

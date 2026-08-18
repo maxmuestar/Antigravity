@@ -338,6 +338,26 @@
         <!-- Launch & Instance Configuration Showcase Bar -->
         <div class="mc-hero-launch-card">
           <div class="mc-hero-bg-glow"></div>
+
+          <!-- Instance Switcher Bar -->
+          <div class="mc-instance-bar">
+            <div class="mc-instance-label-group">
+              <span class="mc-instance-badge"><i class="fa-solid fa-layer-group"></i> INSTANCE</span>
+              <select class="mc-select mc-select-instance" id="mc-select-instance" title="Select Minecraft Installation Profile">
+                <!-- Dynamically populated -->
+              </select>
+            </div>
+
+            <div class="mc-instance-actions">
+              <button class="primary-btn btn-sm btn-success" id="mc-btn-new-instance" title="Create a new isolated Minecraft instance">
+                <i class="fa-solid fa-plus"></i> New Instance
+              </button>
+              <button class="icon-only-btn text-danger" id="mc-btn-delete-instance" title="Delete current instance">
+                <i class="fa-solid fa-trash-can"></i>
+              </button>
+            </div>
+          </div>
+
           <div class="mc-config-row">
             <div class="mc-config-group">
               <label><i class="fa-solid fa-code-branch"></i> Game Version</label>
@@ -366,7 +386,7 @@
 
             <div class="mc-config-group mc-ram-group">
               <div class="mc-ram-label-row">
-                <label><i class="fa-solid fa-memory"></i> RAM Allocation</label>
+                <label><i class="fa-solid fa-memory"></i> RAM ALLOCATION</label>
                 <span class="mc-ram-value" id="mc-ram-display">4 GB</span>
               </div>
               <input type="range" min="2" max="16" step="1" value="4" class="mc-ram-slider" id="mc-ram-slider">
@@ -735,6 +755,66 @@
         </button>
         <button type="button" class="primary-btn btn-success" id="btn-restart-update" style="display: none;">
           <i class="fa-solid fa-rotate-right"></i> Restart & Install Now
+        </button>
+      </div>
+    </div>
+
+    <!-- Modal: Minecraft Create Instance Modal -->
+    <div class="modal-content" id="modal-mc-create-instance">
+      <div class="modal-header">
+        <div class="modal-title-with-icon text-success">
+          <i class="fa-solid fa-cube"></i>
+          <h2>New Minecraft Instance</h2>
+        </div>
+        <button class="modal-close-btn" onclick="closeActiveModal()" title="Close"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <p>Create a fresh, isolated Minecraft installation with custom version and mod loader.</p>
+
+        <div class="form-group" style="margin-top: 1rem;">
+          <label for="mc-modal-inst-name"><i class="fa-solid fa-tag"></i> Instance Name</label>
+          <input type="text" id="mc-modal-inst-name" placeholder="e.g. Fabric 1.20.1 Mods, Forge Pixelmon, Hardcore..." value="Fabric 1.20.1">
+        </div>
+
+        <div class="form-row-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 0.75rem;">
+          <div class="form-group">
+            <label for="mc-modal-inst-version"><i class="fa-solid fa-code-branch"></i> Game Version</label>
+            <select class="mc-select" id="mc-modal-inst-version" style="width: 100%; height: 38px;">
+              <option value="1.21.1">1.21.1</option>
+              <option value="1.20.1" selected>1.20.1</option>
+              <option value="1.19.4">1.19.4</option>
+              <option value="1.18.2">1.18.2</option>
+              <option value="1.16.5">1.16.5</option>
+              <option value="1.12.2">1.12.2</option>
+              <option value="1.8.9">1.8.9</option>
+              <option value="1.7.10">1.7.10</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="mc-modal-inst-loader"><i class="fa-solid fa-microchip"></i> Mod Loader</label>
+            <select class="mc-select" id="mc-modal-inst-loader" style="width: 100%; height: 38px;">
+              <option value="fabric" selected>Fabric</option>
+              <option value="forge">Forge</option>
+              <option value="neoforge">NeoForge</option>
+              <option value="quilt">Quilt</option>
+              <option value="vanilla">Vanilla</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-top: 1rem;">
+          <div class="mc-ram-label-row">
+            <label for="mc-modal-inst-ram"><i class="fa-solid fa-memory"></i> RAM Allocation</label>
+            <span class="mc-ram-value" id="mc-modal-ram-display">4 GB</span>
+          </div>
+          <input type="range" min="2" max="16" step="1" value="4" class="mc-ram-slider" id="mc-modal-inst-ram">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="secondary-btn" id="mc-modal-btn-cancel" onclick="closeActiveModal()">Cancel</button>
+        <button type="button" class="primary-btn btn-success" id="mc-modal-btn-create">
+          <i class="fa-solid fa-plus"></i> Create Instance
         </button>
       </div>
     </div>
