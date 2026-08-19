@@ -84,7 +84,7 @@
       <div class="sidebar-version-footer">
         <div class="version-label">
           <i class="fa-solid fa-code-branch"></i>
-          <span id="app-version-label">v7.0.0</span>
+          <span id="app-version-label">v7.5.0</span>
         </div>
         <button class="check-update-btn" id="btn-check-update" title="Check for Updates on GitHub">
           <i class="fa-solid fa-arrows-rotate" id="check-update-icon"></i>
@@ -312,8 +312,8 @@
           <div class="view-header-actions mc-header-actions">
             <!-- Account Badge -->
             <div class="mc-account-card" id="mc-account-card">
-              <div class="mc-account-avatar-wrapper">
-                <img id="mc-account-avatar" src="https://crafatar.com/avatars/8667ba71-b85a-4004-af54-457a9734eed7?overlay" alt="Skin" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+              <div class="mc-account-avatar-wrapper" style="cursor: pointer;" id="mc-account-avatar-btn" title="Click to customize skin and name">
+                <img id="mc-account-avatar" src="https://mc-heads.net/avatar/Steve/128" alt="Skin" onerror="this.src='https://mc-heads.net/avatar/Steve/128';">
                 <div class="mc-account-avatar-fallback" style="display: none;"><i class="fa-solid fa-cube text-success"></i></div>
               </div>
               <div class="mc-account-info">
@@ -321,6 +321,9 @@
                 <span class="mc-account-type" id="mc-account-type">Microsoft Account</span>
               </div>
               <div class="mc-account-actions">
+                <button class="secondary-btn btn-sm" id="mc-btn-switch-account" title="Switch or manage Minecraft accounts">
+                  <i class="fa-solid fa-users"></i> Accounts
+                </button>
                 <button class="primary-btn btn-sm btn-success" id="mc-btn-login-ms" title="Log in with official Microsoft Account">
                   <i class="fa-brands fa-microsoft"></i> Login
                 </button>
@@ -349,6 +352,9 @@
             </div>
 
             <div class="mc-instance-actions">
+              <button class="secondary-btn btn-sm" id="mc-btn-open-advanced" title="Configure JVM, Java runtime, resolution & settings for this instance">
+                <i class="fa-solid fa-sliders"></i> Settings
+              </button>
               <button class="primary-btn btn-sm btn-success" id="mc-btn-new-instance" title="Create a new isolated Minecraft instance">
                 <i class="fa-solid fa-plus"></i> New Instance
               </button>
@@ -421,6 +427,7 @@
               <button class="mc-mod-tab" data-tab="resourcepack"><i class="fa-solid fa-palette"></i> Resource Packs</button>
               <button class="mc-mod-tab" data-tab="shader"><i class="fa-solid fa-sun"></i> Shader Packs</button>
               <button class="mc-mod-tab" data-tab="installed"><i class="fa-solid fa-folder-check"></i> Installed Mods (<span id="mc-installed-count">0</span>)</button>
+              <button class="mc-mod-tab" data-tab="logs"><i class="fa-solid fa-terminal"></i> Game Logs</button>
             </div>
 
             <div class="mc-quick-folder-actions">
@@ -433,7 +440,7 @@
             </div>
           </div>
 
-          <!-- Search & Filter Toolbar -->
+          <!-- Search & Filter Toolbar for Modrinth Browse -->
           <div class="mc-toolbar" id="mc-browse-toolbar">
             <div class="mc-search-box">
               <i class="fa-solid fa-magnifying-glass search-icon"></i>
@@ -457,29 +464,97 @@
             <!-- Rendered dynamically -->
           </div>
 
-          <!-- Installed Mods List Container -->
+          <!-- Next-Gen Installed Mods Manager Container -->
           <div class="mc-installed-container" id="mc-installed-container" style="display: none;">
-            <div class="mc-installed-header">
-              <h3>Installed Mods & Addons</h3>
-              <p>Toggle mods on/off or delete without opening File Explorer.</p>
+            <div class="mc-installed-topbar">
+              <div class="mc-installed-header">
+                <h3>Installed Mods & Addons <span class="mc-active-inst-badge" id="mc-installed-inst-badge">Default</span></h3>
+                <p>Manage, toggle, update, and drop new mods directly into your active instance.</p>
+              </div>
+
+              <div class="mc-installed-actions">
+                <button class="primary-btn btn-sm btn-info" id="mc-btn-check-updates" title="Check Modrinth for mod updates">
+                  <i class="fa-solid fa-arrows-rotate" id="mc-icon-check-updates"></i> Check Updates
+                </button>
+                <button class="secondary-btn btn-sm" id="mc-btn-enable-all" title="Enable all mods in this instance">
+                  <i class="fa-solid fa-check-double"></i> Enable All
+                </button>
+                <button class="secondary-btn btn-sm" id="mc-btn-disable-all" title="Disable all mods in this instance">
+                  <i class="fa-solid fa-ban"></i> Disable All
+                </button>
+              </div>
             </div>
+
+            <!-- Installed Mods Filter Bar -->
+            <div class="mc-installed-filter-row">
+              <div class="mc-search-box mc-installed-search-box">
+                <i class="fa-solid fa-magnifying-glass search-icon"></i>
+                <input type="text" id="mc-installed-search-input" placeholder="Filter installed mods by name or author...">
+              </div>
+
+              <div class="mc-filter-pills-group">
+                <button class="mc-filter-pill active" data-mod-filter="all" id="mc-mod-filter-all">All</button>
+                <button class="mc-filter-pill" data-mod-filter="enabled" id="mc-mod-filter-enabled">Enabled</button>
+                <button class="mc-filter-pill" data-mod-filter="disabled" id="mc-mod-filter-disabled">Disabled</button>
+              </div>
+            </div>
+
+            <!-- Drag and Drop Jars Dropzone -->
+            <div class="mc-dropzone" id="mc-mod-dropzone">
+              <div class="mc-dropzone-inner">
+                <i class="fa-solid fa-file-arrow-up mc-dropzone-icon"></i>
+                <div class="mc-dropzone-text">
+                  <strong>Drag & Drop .jar mod files here</strong>
+                  <span>or click to browse from your computer</span>
+                </div>
+                <input type="file" id="mc-mod-file-input" multiple accept=".jar,.zip" style="display: none;">
+              </div>
+            </div>
+
+            <!-- Rich Installed Mods Grid/List -->
             <div class="mc-installed-list" id="mc-installed-list">
               <!-- Rendered dynamically -->
             </div>
           </div>
-        </div>
 
-        <!-- Collapsible Console Log Drawer (Collapsed by default) -->
-        <div class="mc-console-drawer collapsed" id="mc-console-drawer">
-          <div class="mc-console-header" id="mc-console-toggle">
-            <div class="mc-console-title">
-              <i class="fa-solid fa-terminal"></i>
-              <span>Game Output & Crash Logs</span>
+          <!-- Dedicated Full-Page Game Logs & Console Tab -->
+          <div class="mc-logs-container" id="mc-logs-container" style="display: none;">
+            <div class="mc-logs-toolbar">
+              <div class="mc-logs-filter-group">
+                <span class="mc-logs-kicker"><i class="fa-solid fa-terminal"></i> CONSOLE</span>
+                <button class="mc-log-filter-btn active" data-level="all">All Logs</button>
+                <button class="mc-log-filter-btn" data-level="info">Info</button>
+                <button class="mc-log-filter-btn" data-level="warn">Warnings</button>
+                <button class="mc-log-filter-btn" data-level="error">Errors</button>
+                <span class="mc-logs-counter" id="mc-logs-line-counter">0 lines</span>
+              </div>
+
+              <div class="mc-logs-actions">
+                <label class="mc-log-autoscroll-toggle">
+                  <input type="checkbox" id="mc-log-autoscroll" checked>
+                  <span>Auto-scroll</span>
+                </label>
+                <button class="secondary-btn btn-sm" id="mc-btn-copy-logs" title="Copy entire console log to clipboard">
+                  <i class="fa-solid fa-copy"></i> Copy
+                </button>
+                <button class="primary-btn btn-sm btn-success" id="mc-btn-upload-mclogs" title="Generate shareable link via mclo.gs">
+                  <i class="fa-solid fa-cloud-arrow-up"></i> Share to mclo.gs
+                </button>
+                <button class="secondary-btn btn-sm text-danger" id="mc-btn-clear-logs" title="Clear console output">
+                  <i class="fa-solid fa-trash-can"></i> Clear
+                </button>
+              </div>
             </div>
-            <i class="fa-solid fa-chevron-up mc-console-arrow"></i>
-          </div>
-          <div class="mc-console-body" id="mc-console-body">
-            <pre id="mc-console-output">Game logs will appear here when launched...</pre>
+
+            <div class="mc-logs-terminal-wrapper" id="mc-logs-terminal-wrapper">
+              <div class="mc-logs-terminal" id="mc-logs-terminal">
+                <div class="mc-log-line mc-log-info">
+                  <span class="mc-log-time">[00:00:00]</span>
+                  <span class="mc-log-tag">[ANTIGRAVITY]</span>
+                  <span class="mc-log-msg">Ready. Minecraft console output will appear here when game starts.</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -713,9 +788,9 @@
       <div class="modal-body">
         <div class="update-banner">
           <div class="update-version-row">
-            <span class="update-badge-old" id="update-current-ver">v7.0.0</span>
+            <span class="update-badge-old" id="update-current-ver">v7.5.0</span>
             <i class="fa-solid fa-arrow-right update-arrow"></i>
-            <span class="update-badge-new" id="update-new-ver">v7.0.0</span>
+            <span class="update-badge-new" id="update-new-ver">v7.5.0</span>
           </div>
           <h3 class="update-release-title" id="update-release-title">AntiGravity</h3>
         </div>
@@ -819,60 +894,328 @@
       </div>
     </div>
 
-  </div>
-
-  <div class="big-picture-overlay" id="big-picture-overlay" aria-hidden="true">
-    <div class="big-picture-topbar">
-      <div>
-        <div class="big-picture-kicker">ANTIGRAVITY</div>
-        <h2>Big Picture</h2>
+    <!-- Modal: Minecraft Advanced Instance Options -->
+    <div class="modal-content modal-lg" id="modal-mc-advanced-options">
+      <div class="modal-header">
+        <div class="modal-title-with-icon text-success">
+          <i class="fa-solid fa-sliders"></i>
+          <h2>Instance Settings & Advanced Options</h2>
+        </div>
+        <button class="modal-close-btn" onclick="closeActiveModal()" title="Close"><i class="fa-solid fa-xmark"></i></button>
       </div>
-      <div class="big-picture-topbar-actions">
-        <button class="big-picture-icon-btn" id="big-picture-fullscreen" title="Toggle fullscreen">
-          <i class="fa-solid fa-expand"></i>
-        </button>
-        <button class="big-picture-icon-btn" id="big-picture-close" title="Close Big Picture">
-          <i class="fa-solid fa-xmark"></i>
+      <div class="modal-body">
+        <p>Configure JVM arguments, Java runtime paths, screen resolutions, and server auto-join for <strong id="mc-adv-inst-title">Active Instance</strong>.</p>
+
+        <div class="mc-adv-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-top: 1.25rem;">
+          <!-- JVM Arguments -->
+          <div class="form-group" style="grid-column: 1 / -1;">
+            <label for="mc-adv-jvm-args"><i class="fa-solid fa-terminal"></i> Custom JVM Arguments (Flags)</label>
+            <input type="text" id="mc-adv-jvm-args" placeholder="e.g. -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:MaxGCPauseMillis=50" style="font-family: var(--font-mono); font-size: 0.82rem;">
+            <span class="form-hint" style="font-size: 0.74rem; color: var(--text-muted); margin-top: 0.25rem; display: block;">Leave empty to use AntiGravity's optimized G1GC GC flags.</span>
+          </div>
+
+          <!-- Custom Java Executable -->
+          <div class="form-group" style="grid-column: 1 / -1;">
+            <label for="mc-adv-java-path"><i class="fa-solid fa-mug-saucer"></i> Java Executable (javaw.exe)</label>
+            <div style="display: flex; gap: 0.5rem;">
+              <input type="text" id="mc-adv-java-path" placeholder="Auto-Detect (downloads isolated JRE automatically)" style="flex: 1; font-family: var(--font-mono); font-size: 0.82rem;">
+              <button class="secondary-btn btn-sm" id="mc-adv-btn-browse-java" type="button"><i class="fa-solid fa-folder-open"></i> Browse</button>
+              <button class="secondary-btn btn-sm" id="mc-adv-btn-clear-java" type="button" title="Reset to auto-detect"><i class="fa-solid fa-rotate-left"></i></button>
+            </div>
+          </div>
+
+          <!-- Resolution: Width & Height -->
+          <div class="form-group">
+            <label for="mc-adv-width"><i class="fa-solid fa-desktop"></i> Game Window Width</label>
+            <input type="number" id="mc-adv-width" value="1280" min="640" max="3840" step="10">
+          </div>
+
+          <div class="form-group">
+            <label for="mc-adv-height"><i class="fa-solid fa-desktop"></i> Game Window Height</label>
+            <input type="number" id="mc-adv-height" value="720" min="480" max="2160" step="10">
+          </div>
+
+          <!-- Fullscreen & Auto-Connect Server -->
+          <div class="form-group">
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin-top: 0.5rem;">
+              <input type="checkbox" id="mc-adv-fullscreen" style="accent-color: #10b981; width: 18px; height: 18px;">
+              <span><strong>Launch in Fullscreen Mode</strong></span>
+            </label>
+          </div>
+
+          <div class="form-group">
+            <label for="mc-adv-server"><i class="fa-solid fa-network-wired"></i> Auto-Connect Multiplayer Server</label>
+            <input type="text" id="mc-adv-server" placeholder="e.g. hypixel.net or mc.example.com:25565">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="secondary-btn" onclick="closeActiveModal()">Cancel</button>
+        <button type="button" class="primary-btn btn-success" id="mc-adv-btn-save">
+          <i class="fa-solid fa-check"></i> Save Settings
         </button>
       </div>
     </div>
 
-    <div class="big-picture-stage">
-      <section class="big-picture-feature">
-        <div class="big-picture-cover" id="big-picture-cover">
-          <i class="fa-solid fa-gamepad"></i>
+    <!-- Modal: Mod & Modpack Version & Target Instance Picker -->
+    <div class="modal-content modal-lg" id="modal-mc-mod-version-picker">
+      <div class="modal-header">
+        <div class="modal-title-with-icon text-success">
+          <i class="fa-solid fa-box-archive"></i>
+          <h2 id="mc-picker-title">Select Mod Version</h2>
         </div>
-        <div class="big-picture-details">
-          <h3 id="big-picture-title">No game selected</h3>
-          <p id="big-picture-path">Add games to your library to use Big Picture.</p>
-          <div class="big-picture-controls">
-            <button class="big-picture-play" id="big-picture-play">
-              <i class="fa-solid fa-play"></i> Play
+        <button class="modal-close-btn" onclick="closeActiveModal()" title="Close"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <!-- Project Summary Header -->
+        <div class="mc-picker-hero" id="mc-picker-hero">
+          <img class="mc-picker-icon" id="mc-picker-icon" src="" alt="Icon">
+          <div class="mc-picker-hero-meta">
+            <h3 id="mc-picker-project-name">Mod Title</h3>
+            <p id="mc-picker-project-desc">Description of the project...</p>
+            <div class="mc-picker-tags" id="mc-picker-tags"></div>
+          </div>
+        </div>
+
+        <!-- Target Instance & Filter Toolbar -->
+        <div class="mc-picker-toolbar">
+          <div class="mc-picker-target-group">
+            <label for="mc-picker-instance-select"><i class="fa-solid fa-layer-group"></i> Install To Instance:</label>
+            <select class="mc-select" id="mc-picker-instance-select">
+              <!-- Dynamically populated -->
+            </select>
+          </div>
+
+          <div class="mc-picker-filter-group">
+            <button class="mc-filter-pill active" data-channel="all">All Channels</button>
+            <button class="mc-filter-pill" data-channel="release">Release</button>
+            <button class="mc-filter-pill" data-channel="beta">Beta</button>
+            <button class="mc-filter-pill" data-channel="alpha">Alpha</button>
+          </div>
+        </div>
+
+        <!-- Versions List Table -->
+        <div class="mc-picker-versions-container" id="mc-picker-versions-container">
+          <div class="mc-picker-loading"><i class="fa-solid fa-arrows-rotate spin-icon"></i> Loading versions...</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="secondary-btn" onclick="closeActiveModal()">Close</button>
+      </div>
+    </div>
+
+    <!-- Modal: Offline Profile & Custom Skin Studio -->
+    <div class="modal-content modal-lg" id="modal-mc-offline-skin-studio">
+      <div class="modal-header">
+        <div class="modal-title-with-icon text-success">
+          <i class="fa-solid fa-shirt"></i>
+          <h2>Offline Player & Skin Studio</h2>
+        </div>
+        <button class="modal-close-btn" onclick="closeActiveModal()" title="Close"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <div class="mc-skin-studio-layout">
+          <!-- Left: Controls & Skin Choosers -->
+          <div class="mc-skin-controls">
+            <div class="form-group">
+              <label for="mc-skin-input-name"><i class="fa-solid fa-user"></i> Offline Player Name</label>
+              <input type="text" id="mc-skin-input-name" placeholder="e.g. Max, Steve, Alex, Player" value="Player">
+            </div>
+
+            <div class="form-group">
+              <label><i class="fa-solid fa-child"></i> Model Arm Thickness</label>
+              <div class="mc-model-toggle-group">
+                <label class="mc-model-opt">
+                  <input type="radio" name="mc-skin-model" value="classic" checked id="mc-model-classic">
+                  <span><strong>Classic</strong> (4px wide arms)</span>
+                </label>
+                <label class="mc-model-opt">
+                  <input type="radio" name="mc-skin-model" value="slim" id="mc-model-slim">
+                  <span><strong>Slim</strong> (3px Alex arms)</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Skin Selector Tabs -->
+            <div class="mc-skin-subtabs">
+              <button class="mc-skin-subtab active" data-skintab="presets"><i class="fa-solid fa-palette"></i> Presets</button>
+              <button class="mc-skin-subtab" data-skintab="username"><i class="fa-solid fa-magnifying-glass"></i> By Username</button>
+              <button class="mc-skin-subtab" data-skintab="upload"><i class="fa-solid fa-file-arrow-up"></i> Upload .PNG</button>
+            </div>
+
+            <!-- Tab 1: Presets Grid -->
+            <div class="mc-skin-tab-content" id="mc-skin-tab-presets">
+              <div class="mc-presets-grid" id="mc-presets-grid">
+                <!-- Dynamically rendered skin presets -->
+              </div>
+            </div>
+
+            <!-- Tab 2: Username Fetcher -->
+            <div class="mc-skin-tab-content" id="mc-skin-tab-username" style="display: none;">
+              <p style="font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 0.75rem;">Enter any Minecraft player or YouTuber's username to copy their official skin.</p>
+              <div style="display: flex; gap: 0.5rem;">
+                <input type="text" id="mc-skin-fetch-name" placeholder="e.g. Notch, Technoblade, Dream, MumboJumbo...">
+                <button class="primary-btn btn-sm btn-info" id="mc-btn-fetch-skin" type="button">
+                  <i class="fa-solid fa-download"></i> Fetch
+                </button>
+              </div>
+            </div>
+
+            <!-- Tab 3: Upload Custom Skin -->
+            <div class="mc-skin-tab-content" id="mc-skin-tab-upload" style="display: none;">
+              <p style="font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 0.75rem;">Upload any standard 64x64 or 64x32 Minecraft `.png` skin file.</p>
+              <div class="mc-dropzone mc-skin-dropzone" id="mc-skin-file-dropzone">
+                <i class="fa-solid fa-cloud-arrow-up" style="font-size: 2rem; color: #10b981;"></i>
+                <span style="font-size: 0.85rem; color: #fff; font-weight: 700;">Click to select or drop .PNG skin file</span>
+                <span style="font-size: 0.74rem; color: var(--text-muted);" id="mc-skin-upload-filename">No file chosen</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Live Skin Preview Card -->
+          <div class="mc-skin-preview-card">
+            <div class="mc-skin-preview-header">
+              <span>LIVE SKIN PREVIEW</span>
+              <span class="mc-skin-tag" id="mc-skin-preview-type">Steve Preset</span>
+            </div>
+
+            <div class="mc-skin-preview-stage">
+              <img id="mc-skin-preview-body-img" src="https://mc-heads.net/body/Steve/256" alt="Full Skin Preview">
+            </div>
+
+            <div class="mc-skin-preview-avatar-row">
+              <img id="mc-skin-preview-face-img" src="https://mc-heads.net/avatar/Steve/128" alt="Avatar">
+              <div style="min-width: 0;">
+                <div id="mc-skin-preview-name-disp" style="font-weight: 800; color: #fff; font-size: 0.95rem;">Player</div>
+                <div style="font-size: 0.74rem; color: #34d399;" id="mc-skin-preview-model-disp">Classic 4px Arms</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="secondary-btn" onclick="closeActiveModal()">Cancel</button>
+        <button type="button" class="primary-btn btn-success" id="mc-btn-apply-offline-skin">
+          <i class="fa-solid fa-check"></i> Apply Skin & Name
+        </button>
+      </div>
+    </div>
+
+    <!-- Modal: Minecraft Account Manager -->
+    <div class="modal-content modal-lg" id="modal-mc-account-manager">
+      <div class="modal-header">
+        <div class="modal-title-with-icon text-success">
+          <i class="fa-solid fa-users"></i>
+          <h2>Minecraft Account Manager</h2>
+        </div>
+        <button class="modal-close-btn" onclick="closeActiveModal()" title="Close"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-description" style="color: var(--text-secondary); margin-bottom: 1.25rem;">
+          Switch instantly between your saved Microsoft and Offline accounts or add new profiles.
+        </p>
+        
+        <div class="mc-accounts-grid" id="mc-accounts-grid">
+          <!-- Dynamically populated account cards -->
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex; gap: 0.6rem; flex-wrap: wrap;">
+          <button type="button" class="primary-btn btn-success btn-sm" id="mc-modal-btn-add-ms">
+            <i class="fa-brands fa-microsoft"></i> Add Microsoft Account
+          </button>
+          <button type="button" class="secondary-btn btn-sm" id="mc-modal-btn-add-offline">
+            <i class="fa-solid fa-user-plus"></i> New Offline Account
+          </button>
+        </div>
+        <button type="button" class="secondary-btn" onclick="closeActiveModal()">Close</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Enhanced Big Picture Mode Overlay -->
+  <div class="big-picture-overlay" id="big-picture-overlay" aria-hidden="true">
+    <div class="bp-ambient-glow" id="bp-ambient-glow"></div>
+
+    <!-- BP Topbar -->
+    <header class="bp-topbar">
+      <div class="bp-topbar-left">
+        <div class="bp-logo"><i class="fa-solid fa-cube text-success"></i> ANTIGRAVITY</div>
+        <nav class="bp-category-tabs">
+          <button class="bp-tab active" data-bp-tab="all"><i class="fa-solid fa-gamepad"></i> All Games</button>
+          <button class="bp-tab" data-bp-tab="favorites"><i class="fa-solid fa-star"></i> Favorites</button>
+          <button class="bp-tab" data-bp-tab="recent"><i class="fa-solid fa-clock-rotate-left"></i> Recently Played</button>
+          <button class="bp-tab" data-bp-tab="minecraft"><i class="fa-solid fa-cube"></i> Minecraft</button>
+        </nav>
+      </div>
+
+      <div class="bp-topbar-right">
+        <div class="bp-status-pill bp-gamepad-pill" id="bp-gamepad-indicator" style="display: none;">
+          <i class="fa-solid fa-gamepad"></i> <span id="bp-gamepad-name">Gamepad Connected</span>
+        </div>
+        <div class="bp-status-pill bp-battery-pill" id="bp-battery-pill" style="display: none;">
+          <i class="fa-solid fa-battery-half" id="bp-battery-icon"></i> <span id="bp-battery-text">100%</span>
+        </div>
+        <div class="bp-clock" id="bp-clock">12:00 PM</div>
+        <button class="bp-icon-btn" id="big-picture-close" title="Exit Big Picture (ESC / B)"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+    </header>
+
+    <!-- BP Stage -->
+    <main class="bp-stage">
+      <!-- Focused Game Hero Showcase -->
+      <section class="bp-hero" id="bp-hero">
+        <div class="bp-hero-cover-wrap">
+          <img class="bp-hero-cover" id="bp-hero-cover-img" src="" alt="Cover" style="display: none;">
+          <div class="bp-hero-cover-fallback" id="bp-hero-cover-fallback"><i class="fa-solid fa-gamepad"></i></div>
+        </div>
+
+        <div class="bp-hero-info">
+          <div class="bp-hero-badge" id="bp-hero-badge">READY TO PLAY</div>
+          <h1 class="bp-hero-title" id="bp-hero-title">No Game Selected</h1>
+          <p class="bp-hero-subtitle" id="bp-hero-subtitle">Select a game from your carousel below.</p>
+
+          <div class="bp-hero-actions">
+            <button class="bp-btn-play" id="bp-btn-play">
+              <i class="fa-solid fa-play"></i> <span>PLAY NOW</span>
             </button>
-            <button class="big-picture-action" id="big-picture-folder">
-              <i class="fa-solid fa-folder-open"></i> Folder
+            <button class="bp-btn-secondary" id="bp-btn-folder" title="Open Installation Folder">
+              <i class="fa-solid fa-folder-open"></i> <span>Folder</span>
             </button>
-            <button class="big-picture-action" id="big-picture-shortcut">
-              <i class="fa-solid fa-link"></i> Shortcut
+            <button class="bp-btn-secondary" id="bp-btn-favorite" title="Toggle Favorite (X)">
+              <i class="fa-solid fa-star"></i> <span id="bp-fav-label">Favorite</span>
+            </button>
+            <button class="bp-btn-secondary" id="bp-btn-random" title="Pick Random Game (Y)">
+              <i class="fa-solid fa-shuffle"></i> <span>Surprise Me</span>
             </button>
           </div>
         </div>
       </section>
 
-      <div class="big-picture-rail" id="big-picture-rail">
-        <!-- Rendered dynamically -->
-      </div>
-    </div>
+      <!-- Carousel Cards Rail -->
+      <section class="bp-carousel-section">
+        <div class="bp-carousel-header">
+          <span class="bp-carousel-title" id="bp-carousel-heading">Library Games (<span id="bp-game-count">0</span>)</span>
+          <span class="bp-carousel-hint"><i class="fa-solid fa-arrow-left"></i> <i class="fa-solid fa-arrow-right"></i> Navigate / D-Pad</span>
+        </div>
+        <div class="bp-cards-rail" id="bp-cards-rail" tabindex="0">
+          <!-- Dynamically populated 3D cards -->
+        </div>
+      </section>
+    </main>
 
-    <div class="big-picture-footer">
-      <span><i class="fa-solid fa-arrow-left"></i><i class="fa-solid fa-arrow-right"></i> Select</span>
-      <span><i class="fa-solid fa-keyboard"></i> Enter Play</span>
-      <span>A Play</span>
-      <span>B Close</span>
-      <span>X Folder</span>
-      <span>Y Shortcut</span>
-      <span>Esc Close</span>
-    </div>
+    <!-- BP Controller Hints Footer -->
+    <footer class="bp-footer">
+      <div class="bp-hint"><span class="bp-key-badge btn-a">A</span> <span class="bp-hint-text">Play</span></div>
+      <div class="bp-hint"><span class="bp-key-badge btn-x">X</span> <span class="bp-hint-text">Favorite</span></div>
+      <div class="bp-hint"><span class="bp-key-badge btn-y">Y</span> <span class="bp-hint-text">Random</span></div>
+      <div class="bp-hint"><span class="bp-key-badge btn-b">B</span> <span class="bp-hint-text">Exit</span></div>
+      <div class="bp-hint"><span class="bp-key-badge btn-lb">LB</span><span class="bp-key-badge btn-rb">RB</span> <span class="bp-hint-text">Switch Category</span></div>
+      <div class="bp-hint"><span class="bp-key-badge btn-dpad"><i class="fa-solid fa-arrows-up-down-left-right"></i></span> <span class="bp-hint-text">Select</span></div>
+    </footer>
+  </div>
+
   <!-- Toast Notifications Container -->
   <div class="toast-container" id="toast-container"></div>
 

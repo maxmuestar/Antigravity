@@ -455,24 +455,31 @@ function setupLibraryActions() {
 }
 
 function setupBigPictureControls() {
-  document.getElementById('big-picture-close').addEventListener('click', () => {
+  document.getElementById('big-picture-close')?.addEventListener('click', () => {
     closeBigPicture();
   });
 
-  document.getElementById('big-picture-fullscreen').addEventListener('click', async () => {
-    await toggleBigPictureFullscreen();
-  });
-
-  document.getElementById('big-picture-play').addEventListener('click', () => {
+  document.getElementById('bp-btn-play')?.addEventListener('click', () => {
     launchSelectedBigPictureGame();
   });
 
-  document.getElementById('big-picture-folder').addEventListener('click', async () => {
+  document.getElementById('bp-btn-folder')?.addEventListener('click', async () => {
     await openSelectedBigPictureFolder();
   });
 
-  document.getElementById('big-picture-shortcut').addEventListener('click', async () => {
-    await createSelectedBigPictureShortcut();
+  document.getElementById('bp-btn-favorite')?.addEventListener('click', async () => {
+    await toggleSelectedBigPictureFavorite();
+  });
+
+  document.getElementById('bp-btn-random')?.addEventListener('click', () => {
+    selectRandomBigPictureGame();
+  });
+
+  // Category Tab switching
+  document.querySelectorAll('.bp-tab').forEach(tab => {
+    tab.addEventListener('click', (e) => {
+      setBigPictureTab(e.currentTarget.dataset.bpTab || 'all');
+    });
   });
 
   document.addEventListener('keydown', (event) => {
@@ -490,6 +497,18 @@ function setupBigPictureControls() {
     } else if (event.key === 'Enter') {
       event.preventDefault();
       launchSelectedBigPictureGame();
+    } else if (event.key.toLowerCase() === 'x' || event.key.toLowerCase() === 'f') {
+      event.preventDefault();
+      toggleSelectedBigPictureFavorite();
+    } else if (event.key.toLowerCase() === 'y' || event.key.toLowerCase() === 'r') {
+      event.preventDefault();
+      selectRandomBigPictureGame();
+    } else if (event.key === 'Tab' || event.key === 'q') {
+      event.preventDefault();
+      cycleBigPictureTab(-1);
+    } else if (event.key === 'e') {
+      event.preventDefault();
+      cycleBigPictureTab(1);
     }
   });
 }
@@ -1409,70 +1428,156 @@ function getCoverUrl(game) {
     : '';
 }
 
+let bpClockInterval = null;
+
+function updateBigPictureClock() {
+  const clockEl = document.getElementById('bp-clock');
+  if (!clockEl) return;
+  const now = new Date();
+  clockEl.innerText = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function updateBigPictureBattery() {
+  const pill = document.getElementById('bp-battery-pill');
+  const icon = document.getElementById('bp-battery-icon');
+  const text = document.getElementById('bp-battery-text');
+  if (!pill || !text || !navigator.getBattery) return;
+
+  navigator.getBattery().then(battery => {
+    pill.style.display = 'flex';
+    text.innerText = `${Math.round(battery.level * 100)}%`;
+    if (battery.charging) {
+      if (icon) icon.className = 'fa-solid fa-bolt text-success';
+    } else if (battery.level > 0.6) {
+      if (icon) icon.className = 'fa-solid fa-battery-full text-success';
+    } else if (battery.level > 0.2) {
+      if (icon) icon.className = 'fa-solid fa-battery-half text-warning';
+    } else {
+      if (icon) icon.className = 'fa-solid fa-battery-quarter text-danger';
+    }
+  }).catch(() => {});
+}
+
+const MINECRAFT_DEFAULT_COVER = 'https://launchercontent.mojang.com/gameDetails/java.png';
+
+function getMinecraftBigPictureItems() {
+  const instances = mcState.instancesData?.instances || [];
+  if (instances.length === 0) {
+    const active = mcState.activeInstance || { name: 'Fabric 1.20.1', version: '1.20.1', loader: 'fabric' };
+    return [{
+      id: 'minecraft-default',
+      instanceId: active.id || 'default-fabric',
+      isMinecraft: true,
+      title: 'Minecraft: Java Edition',
+      version: active.version || '1.20.1',
+      loader: active.loader || 'fabric',
+      coverPath: MINECRAFT_DEFAULT_COVER,
+      exePath: `Minecraft Java Edition • ${active.version || '1.20.1'} (${(active.loader || 'fabric').toUpperCase()})`,
+      favorite: false,
+      lastPlayed: active.lastPlayed || 0,
+      playtimeMinutes: active.playtimeMinutes || 0
+    }];
+  }
+
+  return instances.map(inst => ({
+    id: `minecraft-${inst.id}`,
+    instanceId: inst.id,
+    isMinecraft: true,
+    title: inst.name || `Minecraft ${inst.version}`,
+    version: inst.version,
+    loader: inst.loader,
+    coverPath: inst.coverPath || MINECRAFT_DEFAULT_COVER,
+    exePath: `Minecraft Java Edition • ${inst.version} (${inst.loader.toUpperCase()})`,
+    favorite: inst.favorite || false,
+    lastPlayed: inst.lastPlayed || 0,
+    playtimeMinutes: inst.playtimeMinutes || 0
+  }));
+}
+
+function getBigPictureFilteredGames() {
+  const tab = appState.bigPictureTab || 'all';
+  const mcItems = getMinecraftBigPictureItems();
+
+  if (tab === 'minecraft') {
+    return mcItems;
+  } else if (tab === 'favorites') {
+    const favGames = appState.library.filter(g => g.favorite);
+    const favMc = mcItems.filter(m => m.favorite);
+    return [...favMc, ...favGames];
+  } else if (tab === 'recent') {
+    const combined = [...mcItems, ...appState.library];
+    return combined.sort((a, b) => {
+      const timeA = a.lastPlayed ? new Date(a.lastPlayed).getTime() : 0;
+      const timeB = b.lastPlayed ? new Date(b.lastPlayed).getTime() : 0;
+      return timeB - timeA;
+    });
+  }
+  
+  // 'all': Show Minecraft instances + library games
+  return [...mcItems, ...appState.library];
+}
+
 function getSelectedBigPictureGame() {
-  return appState.library[appState.bigPictureSelectedIndex] || null;
-}
-
-async function enterBigPictureFullscreen() {
-  const result = await window.api.setWindowFullscreen(true);
-  if (!result?.success) {
-    console.warn('Could not enter fullscreen:', result?.error);
-  }
-}
-
-async function exitBigPictureFullscreen() {
-  const result = await window.api.setWindowFullscreen(false);
-  if (!result?.success) {
-    console.warn('Could not exit fullscreen:', result?.error);
-  }
-}
-
-async function toggleBigPictureFullscreen() {
-  const isFullscreen = await window.api.isWindowFullscreen();
-  const result = await window.api.setWindowFullscreen(!isFullscreen);
-  if (!result?.success) {
-    console.warn('Could not toggle fullscreen:', result?.error);
-  }
+  const list = getBigPictureFilteredGames();
+  return list[appState.bigPictureSelectedIndex] || null;
 }
 
 async function openBigPicture() {
   sfx.play('big_picture');
   appState.bigPictureActive = true;
-  appState.bigPictureSelectedIndex = Math.min(
-    appState.bigPictureSelectedIndex,
-    Math.max(appState.library.length - 1, 0)
-  );
-  bigPictureOverlay.classList.add('active');
-  bigPictureOverlay.setAttribute('aria-hidden', 'false');
+  appState.bigPictureTab = 'all';
+  appState.bigPictureSelectedIndex = 0;
+
+  const overlay = document.getElementById('big-picture-overlay');
+  if (overlay) {
+    overlay.classList.add('active');
+    overlay.setAttribute('aria-hidden', 'false');
+  }
   document.body.classList.add('big-picture-open');
+
+  // Enter true fullscreen for console experience
+  await window.api.setWindowFullscreen(true);
+
+  updateBigPictureClock();
+  updateBigPictureBattery();
+  clearInterval(bpClockInterval);
+  bpClockInterval = setInterval(updateBigPictureClock, 1000);
+
+  // Set active tab UI
+  document.querySelectorAll('.bp-tab').forEach(tab => {
+    tab.classList.toggle('active', tab.dataset.bpTab === 'all');
+  });
+
   renderBigPicture();
   startBigPictureControllerSupport();
-  await enterBigPictureFullscreen();
 }
 
 async function closeBigPicture() {
   sfx.play('click');
   appState.bigPictureActive = false;
   stopBigPictureControllerSupport();
-  bigPictureOverlay.classList.remove('active');
-  bigPictureOverlay.setAttribute('aria-hidden', 'true');
+  clearInterval(bpClockInterval);
+
+  const overlay = document.getElementById('big-picture-overlay');
+  if (overlay) {
+    overlay.classList.remove('active');
+    overlay.setAttribute('aria-hidden', 'true');
+  }
   document.body.classList.remove('big-picture-open');
 
-  if (document.fullscreenElement === bigPictureOverlay) {
-    document.exitFullscreen().catch(() => {});
-  }
-
-  await exitBigPictureFullscreen();
+  // Exit fullscreen and return to maximized window
+  await window.api.setWindowFullscreen(false);
 }
 
 function selectBigPictureGame(index) {
-  if (appState.library.length === 0) return;
+  const list = getBigPictureFilteredGames();
+  if (list.length === 0) return;
   sfx.play('hover');
 
-  const lastIndex = appState.library.length - 1;
+  const maxIndex = list.length - 1;
   if (index < 0) {
-    appState.bigPictureSelectedIndex = lastIndex;
-  } else if (index > lastIndex) {
+    appState.bigPictureSelectedIndex = maxIndex;
+  } else if (index > maxIndex) {
     appState.bigPictureSelectedIndex = 0;
   } else {
     appState.bigPictureSelectedIndex = index;
@@ -1481,60 +1586,137 @@ function selectBigPictureGame(index) {
   renderBigPictureSelection();
 }
 
-function renderBigPicture() {
-  bigPictureRail.innerHTML = '';
+function selectRandomBigPictureGame() {
+  const list = getBigPictureFilteredGames();
+  if (list.length <= 1) return;
+  sfx.play('action');
+  let nextIdx;
+  do {
+    nextIdx = Math.floor(Math.random() * list.length);
+  } while (nextIdx === appState.bigPictureSelectedIndex);
+  appState.bigPictureSelectedIndex = nextIdx;
+  renderBigPictureSelection();
+  showToast('Random Game!', `Selected: ${list[nextIdx].title}`, 'info', 2000);
+}
 
-  if (appState.library.length === 0) {
-    bigPictureTitle.innerText = 'No games yet';
-    bigPicturePath.innerText = 'Download or add a game first.';
-    bigPictureCover.style.backgroundImage = 'none';
-    bigPictureCover.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i>';
+function setBigPictureTab(tabKey) {
+  sfx.play('click');
+  appState.bigPictureTab = tabKey;
+  appState.bigPictureSelectedIndex = 0;
+
+  document.querySelectorAll('.bp-tab').forEach(tab => {
+    tab.classList.toggle('active', tab.dataset.bpTab === tabKey);
+  });
+
+  renderBigPicture();
+}
+
+function renderBigPicture() {
+  const rail = document.getElementById('bp-cards-rail');
+  const countEl = document.getElementById('bp-game-count');
+  const headingEl = document.getElementById('bp-carousel-heading');
+  const list = getBigPictureFilteredGames();
+
+  if (countEl) countEl.innerText = list.length;
+  if (headingEl) {
+    const tabNames = { all: 'All Games', favorites: 'Favorite Games', recent: 'Recently Played', minecraft: 'Minecraft Editions' };
+    headingEl.innerText = `${tabNames[appState.bigPictureTab || 'all']} (${list.length})`;
+  }
+
+  if (!rail) return;
+  rail.innerHTML = '';
+
+  if (list.length === 0) {
+    rail.innerHTML = `<div style="padding: 2.5rem 1rem; color: var(--text-secondary); font-size: 0.95rem; display: flex; align-items: center; gap: 0.75rem;"><i class="fa-solid fa-gamepad"></i> No games found in this category.</div>`;
+    renderBigPictureSelection();
     return;
   }
 
-  appState.library.forEach((game, index) => {
-    const item = document.createElement('button');
-    item.className = 'big-picture-game';
-    item.dataset.index = index;
+  list.forEach((game, index) => {
+    const card = document.createElement('div');
+    card.className = 'bp-card';
+    card.dataset.index = index;
 
     const coverUrl = getCoverUrl(game);
-    item.innerHTML = coverUrl
-      ? `<img src="${escapeHtml(coverUrl)}" alt="${escapeHtml(game.title)}">`
-      : `<div class="big-picture-game-placeholder"><i class="fa-solid fa-gamepad"></i><span>${escapeHtml(game.title)}</span></div>`;
+    const favBadge = game.favorite ? `<div class="bp-card-fav-star"><i class="fa-solid fa-star"></i></div>` : '';
+    const tag = game.isMinecraft ? `${game.loader || 'Java'} ${game.version || ''}`.trim() : 'Game';
 
-    item.addEventListener('click', () => {
-      selectBigPictureGame(index);
-    });
+    card.innerHTML = coverUrl
+      ? `<img src="${escapeHtml(coverUrl)}" alt="${escapeHtml(game.title)}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+         <div class="bp-card-fallback" style="display: none;"><i class="fa-solid ${game.isMinecraft ? 'fa-cube text-success' : 'fa-gamepad'}"></i><span>${escapeHtml(game.title)}</span></div>
+         <div class="bp-card-overlay"><div class="bp-card-overlay-title">${escapeHtml(game.title)}</div><div class="bp-card-overlay-tag">${escapeHtml(tag)}</div></div>
+         ${favBadge}`
+      : `<div class="bp-card-fallback"><i class="fa-solid ${game.isMinecraft ? 'fa-cube text-success' : 'fa-gamepad'}"></i><span>${escapeHtml(game.title)}</span></div>
+         <div class="bp-card-overlay"><div class="bp-card-overlay-title">${escapeHtml(game.title)}</div><div class="bp-card-overlay-tag">${escapeHtml(tag)}</div></div>
+         ${favBadge}`;
 
-    item.addEventListener('dblclick', () => {
-      launchSelectedBigPictureGame();
-    });
+    card.onclick = () => selectBigPictureGame(index);
+    card.ondblclick = () => launchSelectedBigPictureGame();
 
-    bigPictureRail.appendChild(item);
+    rail.appendChild(card);
   });
 
   renderBigPictureSelection();
 }
 
 function renderBigPictureSelection() {
-  const game = getSelectedBigPictureGame();
-  if (!game) return;
+  const list = getBigPictureFilteredGames();
+  const game = list[appState.bigPictureSelectedIndex] || null;
+
+  const heroCoverImg = document.getElementById('bp-hero-cover-img');
+  const heroCoverFallback = document.getElementById('bp-hero-cover-fallback');
+  const heroTitle = document.getElementById('bp-hero-title');
+  const heroSubtitle = document.getElementById('bp-hero-subtitle');
+  const favLabel = document.getElementById('bp-fav-label');
+  const heroBadge = document.getElementById('bp-hero-badge');
+  const ambientGlow = document.getElementById('bp-ambient-glow');
+
+  if (!game) {
+    if (heroCoverImg) heroCoverImg.style.display = 'none';
+    if (heroCoverFallback) heroCoverFallback.style.display = 'flex';
+    if (heroTitle) heroTitle.innerText = 'No Game Available';
+    if (heroSubtitle) heroSubtitle.innerText = 'Download or add games to your library.';
+    if (heroBadge) heroBadge.innerText = 'EMPTY CATEGORY';
+    return;
+  }
 
   const coverUrl = getCoverUrl(game);
+  if (coverUrl) {
+    if (heroCoverImg) {
+      heroCoverImg.src = coverUrl;
+      heroCoverImg.style.display = 'block';
+      heroCoverImg.onerror = () => {
+        heroCoverImg.style.display = 'none';
+        if (heroCoverFallback) heroCoverFallback.style.display = 'flex';
+      };
+    }
+    if (heroCoverFallback) heroCoverFallback.style.display = 'none';
+  } else {
+    if (heroCoverImg) heroCoverImg.style.display = 'none';
+    if (heroCoverFallback) {
+      heroCoverFallback.style.display = 'flex';
+      heroCoverFallback.innerHTML = `<i class="fa-solid ${game.isMinecraft ? 'fa-cube text-success' : 'fa-gamepad'}"></i>`;
+    }
+  }
+
   const playtimeStr = formatPlaytime(game.playtimeMinutes);
   const lastPlayedStr = formatLastPlayed(game.lastPlayed);
-  const favStar = game.favorite ? ' ⭐' : '';
+  if (heroTitle) heroTitle.innerText = game.title;
+  if (heroSubtitle) heroSubtitle.innerText = `${game.exePath ? game.exePath.split('/').pop() : 'Direct Launch'} • ${playtimeStr} • ${lastPlayedStr}`;
+  if (heroBadge) heroBadge.innerText = game.isMinecraft ? '⛏️ MINECRAFT EDITION' : (game.favorite ? '⭐ FAVORITE GAME' : 'READY TO PLAY');
+  if (favLabel) favLabel.innerText = game.favorite ? 'Favorited' : 'Favorite';
 
-  bigPictureTitle.innerText = `${game.title}${favStar}`;
-  bigPicturePath.innerText = `${game.exePath || 'No startup path selected'} • ${playtimeStr} • ${lastPlayedStr}`;
-  bigPictureCover.style.backgroundImage = coverUrl ? `url("${coverUrl}")` : 'none';
-  bigPictureCover.innerHTML = coverUrl ? '' : '<i class="fa-solid fa-gamepad"></i>';
+  // Dynamic ambient glowing color
+  if (ambientGlow) {
+    const hue = Math.abs(game.title.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0)) % 360;
+    ambientGlow.style.background = `radial-gradient(circle at 25% 35%, hsla(${hue}, 80%, 55%, 0.22), transparent 65%), radial-gradient(circle at 80% 65%, hsla(${(hue + 60) % 360}, 75%, 50%, 0.18), transparent 60%)`;
+  }
 
-  document.querySelectorAll('.big-picture-game').forEach((item) => {
-    const isSelected = Number(item.dataset.index) === appState.bigPictureSelectedIndex;
-    item.classList.toggle('selected', isSelected);
+  document.querySelectorAll('.bp-card').forEach(card => {
+    const isSelected = Number(card.dataset.index) === appState.bigPictureSelectedIndex;
+    card.classList.toggle('selected', isSelected);
     if (isSelected) {
-      item.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+      card.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
     }
   });
 }
@@ -1542,28 +1724,46 @@ function renderBigPictureSelection() {
 async function launchSelectedBigPictureGame() {
   const game = getSelectedBigPictureGame();
   if (!game) return;
+  sfx.play('launch');
+
+  if (game.isMinecraft) {
+    if (game.instanceId && mcState.instancesData?.instances) {
+      const targetInst = mcState.instancesData.instances.find(i => i.id === game.instanceId);
+      if (targetInst && targetInst.id !== mcState.activeInstance?.id) {
+        await window.api.mcSetActiveInstance(targetInst.id);
+        mcState.activeInstance = await window.api.mcGetActiveInstance();
+        renderMinecraftHub();
+      }
+    }
+    showToast('Launching Minecraft', `Starting ${game.title}...`, 'info', 4000);
+    await launchMinecraft();
+    return;
+  }
+
   await launchGameWithSteamCheck(game.id);
+}
+
+async function toggleSelectedBigPictureFavorite() {
+  const game = getSelectedBigPictureGame();
+  if (!game) return;
+  sfx.play('action');
+  if (!game.isMinecraft) {
+    await window.api.toggleGameFavorite(game.id);
+  }
+  game.favorite = !game.favorite;
+  renderBigPicture();
 }
 
 async function openSelectedBigPictureFolder() {
   const game = getSelectedBigPictureGame();
   if (!game) return;
-
+  if (game.isMinecraft) {
+    window.api.mcOpenFolder('root', game.instanceId || mcState.activeInstance?.id);
+    return;
+  }
   const res = await window.api.openGameFolder(game.id);
   if (!res.success) {
     alert(`Could not open folder: ${res.error}`);
-  }
-}
-
-async function createSelectedBigPictureShortcut() {
-  const game = getSelectedBigPictureGame();
-  if (!game) return;
-
-  const res = await window.api.createGameShortcut(game.id);
-  if (res.success) {
-    alert(`Shortcut created on your desktop:\n${res.path}`);
-  } else {
-    alert(`Could not create shortcut: ${res.error}`);
   }
 }
 
@@ -1589,6 +1789,18 @@ function pollBigPictureController(timestamp) {
   if (!appState.bigPictureActive) return;
 
   const gamepad = getFirstConnectedGamepad();
+  const gamepadIndicator = document.getElementById('bp-gamepad-indicator');
+  const gamepadNameEl = document.getElementById('bp-gamepad-name');
+
+  if (gamepad) {
+    if (gamepadIndicator) {
+      gamepadIndicator.style.display = 'flex';
+      if (gamepadNameEl) gamepadNameEl.innerText = gamepad.id.slice(0, 18) || 'Gamepad Connected';
+    }
+  } else {
+    if (gamepadIndicator) gamepadIndicator.style.display = 'none';
+  }
+
   const canHandleInput = timestamp - appState.lastControllerInputAt > controllerRepeatMs;
 
   if (gamepad && canHandleInput) {
@@ -1596,45 +1808,35 @@ function pollBigPictureController(timestamp) {
     const axisX = gamepad.axes[0] || 0;
     let handled = false;
 
-    if (modalSteamWarning.classList.contains('active')) {
-      if (buttons[0]?.pressed) {
-        openSteamAndContinuePendingLaunch();
-        handled = true;
-      } else if (buttons[1]?.pressed) {
-        continuePendingLaunchAnyway();
-        handled = true;
-      }
-    } else if (modalAntivirusReminder.classList.contains('active')) {
-      if (buttons[0]?.pressed || buttons[1]?.pressed) {
-        closeActiveModal();
-        handled = true;
-      } else if (buttons[2]?.pressed) {
-        window.api.openStorageFolder('data');
-        handled = true;
-      } else if (buttons[3]?.pressed) {
-        window.api.openWindowsSecurity();
-        handled = true;
-      }
-    } else if (buttons[14]?.pressed || axisX < -controllerAxisThreshold) {
+    if (buttons[14]?.pressed || axisX < -controllerAxisThreshold) {
       selectBigPictureGame(appState.bigPictureSelectedIndex - 1);
       handled = true;
     } else if (buttons[15]?.pressed || axisX > controllerAxisThreshold) {
       selectBigPictureGame(appState.bigPictureSelectedIndex + 1);
       handled = true;
     } else if (buttons[0]?.pressed) {
+      // Button A: Launch
       launchSelectedBigPictureGame();
       handled = true;
     } else if (buttons[1]?.pressed) {
+      // Button B: Exit Big Picture
       closeBigPicture();
       handled = true;
     } else if (buttons[2]?.pressed) {
-      openSelectedBigPictureFolder();
+      // Button X: Favorite
+      toggleSelectedBigPictureFavorite();
       handled = true;
     } else if (buttons[3]?.pressed) {
-      createSelectedBigPictureShortcut();
+      // Button Y: Random Game
+      selectRandomBigPictureGame();
       handled = true;
-    } else if (buttons[9]?.pressed) {
-      toggleBigPictureFullscreen();
+    } else if (buttons[4]?.pressed) {
+      // LB: Previous Category
+      cycleBigPictureTab(-1);
+      handled = true;
+    } else if (buttons[5]?.pressed) {
+      // RB: Next Category
+      cycleBigPictureTab(1);
       handled = true;
     }
 
@@ -1644,6 +1846,13 @@ function pollBigPictureController(timestamp) {
   }
 
   appState.bigPictureControllerFrame = requestAnimationFrame(pollBigPictureController);
+}
+
+function cycleBigPictureTab(dir) {
+  const tabs = ['all', 'favorites', 'recent', 'minecraft'];
+  const curIdx = tabs.indexOf(appState.bigPictureTab || 'all');
+  const nextIdx = (curIdx + dir + tabs.length) % tabs.length;
+  setBigPictureTab(tabs[nextIdx]);
 }
 
 // Render games library list
@@ -1890,14 +2099,20 @@ function openDeleteModal(gameId) {
 // Minecraft Launcher & Mod Center Frontend Controller
 // ========================================================
 let mcState = {
-  activeTab: 'mod', // 'mod', 'modpack', 'resourcepack', 'shader', 'installed'
+  activeTab: 'mod', // 'mod', 'modpack', 'resourcepack', 'shader', 'installed', 'logs'
   profile: null,
   instancesData: { activeInstanceId: 'default-fabric', instances: [] },
   activeInstance: null,
   searchQuery: '',
   searchDebounce: null,
   isLaunching: false,
-  installedMods: []
+  installedMods: [],
+  installedFilter: 'all', // 'all', 'enabled', 'disabled'
+  installedSearch: '',
+  modUpdates: [],
+  rawLogLines: [],
+  logFilter: 'all', // 'all', 'info', 'warn', 'error'
+  autoScrollLogs: true
 };
 
 let mcHubInitialized = false;
@@ -1920,9 +2135,22 @@ async function setupMinecraftHub() {
   const searchInput = document.getElementById('mc-mod-search-input');
   const searchClear = document.getElementById('mc-mod-search-clear');
   const sortSelect = document.getElementById('mc-filter-sort');
-  const consoleToggle = document.getElementById('mc-console-toggle');
   const btnOpenMods = document.getElementById('mc-btn-open-mods-folder');
   const btnOpenMc = document.getElementById('mc-btn-open-mc-folder');
+
+  // Installed mods UI elements
+  const installedSearchInput = document.getElementById('mc-installed-search-input');
+  const btnEnableAll = document.getElementById('mc-btn-enable-all');
+  const btnDisableAll = document.getElementById('mc-btn-disable-all');
+  const btnCheckUpdates = document.getElementById('mc-btn-check-updates');
+  const dropzone = document.getElementById('mc-mod-dropzone');
+  const fileInput = document.getElementById('mc-mod-file-input');
+
+  // Logs UI elements
+  const btnCopyLogs = document.getElementById('mc-btn-copy-logs');
+  const btnUploadMclogs = document.getElementById('mc-btn-upload-mclogs');
+  const btnClearLogs = document.getElementById('mc-btn-clear-logs');
+  const logAutoScrollCheck = document.getElementById('mc-log-autoscroll');
 
   try {
     mcState.profile = await window.api.mcGetProfile();
@@ -2100,18 +2328,74 @@ async function setupMinecraftHub() {
     }
   });
 
-  // Offline Player Profile
-  btnOffline?.addEventListener('click', async () => {
+  // Advanced Options Open
+  const btnOpenAdvanced = document.getElementById('mc-btn-open-advanced');
+  btnOpenAdvanced?.addEventListener('click', () => {
     sfx.play('click');
-    const name = prompt('Enter your offline player name:', 'Steve');
-    if (name && name.trim()) {
-      const res = await window.api.mcSetOfflineProfile(name.trim());
-      if (res && res.success) {
-        mcState.profile = res.profile;
-        renderMinecraftAccount();
-        sfx.play('action');
-        showToast('Offline Mode Active', `Playing as ${name.trim()}.`, 'info', 3000);
+    openAdvancedOptions();
+  });
+
+  // Account Manager Modal Open
+  const btnSwitchAccount = document.getElementById('mc-btn-switch-account');
+  btnSwitchAccount?.addEventListener('click', () => {
+    sfx.play('click');
+    openMinecraftAccountManagerModal();
+  });
+
+  const modalBtnAddMs = document.getElementById('mc-modal-btn-add-ms');
+  modalBtnAddMs?.addEventListener('click', async () => {
+    sfx.play('click');
+    showToast('Microsoft Login', 'Opening secure Microsoft login window...', 'info', 4000);
+    const res = await window.api.mcLoginMicrosoft();
+    if (res && res.success) {
+      mcState.profile = res.profile;
+      renderMinecraftAccount();
+      openMinecraftAccountManagerModal();
+      sfx.play('action');
+      showToast('Welcome, ' + res.profile.gamertag + '!', 'Microsoft Account linked successfully.', 'success', 4000);
+    } else {
+      showToast('Login Canceled / Failed', res?.error || 'Could not authenticate Microsoft account.', 'error', 4000);
+    }
+  });
+
+  const modalBtnAddOffline = document.getElementById('mc-modal-btn-add-offline');
+  modalBtnAddOffline?.addEventListener('click', () => {
+    sfx.play('click');
+    closeActiveModal();
+    openSkinStudio();
+  });
+
+  // Offline Skin Studio Open (via offline button or clicking avatar)
+  btnOffline?.addEventListener('click', () => {
+    sfx.play('click');
+    openSkinStudio();
+  });
+
+  const accountAvatar = document.getElementById('mc-account-avatar');
+  const accountAvatarBtn = document.getElementById('mc-account-avatar-btn');
+  [accountAvatar, accountAvatarBtn].forEach(el => {
+    el?.addEventListener('click', () => {
+      if (mcState.profile?.isOffline || !mcState.profile) {
+        sfx.play('click');
+        openSkinStudio();
+      } else {
+        openMinecraftAccountManagerModal();
       }
+    });
+  });
+
+  // Microsoft Login
+  btnLoginMs?.addEventListener('click', async () => {
+    sfx.play('click');
+    showToast('Microsoft Login', 'Opening secure Microsoft login window...', 'info', 4000);
+    const res = await window.api.mcLoginMicrosoft();
+    if (res && res.success) {
+      mcState.profile = res.profile;
+      renderMinecraftAccount();
+      sfx.play('action');
+      showToast('Welcome, ' + res.profile.gamertag + '!', 'Microsoft Account linked successfully.', 'success', 4000);
+    } else {
+      showToast('Login Canceled / Failed', res?.error || 'Could not authenticate Microsoft account.', 'error', 4000);
     }
   });
 
@@ -2146,22 +2430,201 @@ async function setupMinecraftHub() {
       const browseToolbar = document.getElementById('mc-browse-toolbar');
       const modsGrid = document.getElementById('mc-mods-grid');
       const installedContainer = document.getElementById('mc-installed-container');
+      const logsContainer = document.getElementById('mc-logs-container');
 
       if (mcState.activeTab === 'installed') {
         if (browseToolbar) browseToolbar.style.display = 'none';
         if (modsGrid) modsGrid.style.display = 'none';
         if (installedContainer) installedContainer.style.display = 'flex';
+        if (logsContainer) logsContainer.style.display = 'none';
         loadInstalledMods();
+      } else if (mcState.activeTab === 'logs') {
+        if (browseToolbar) browseToolbar.style.display = 'none';
+        if (modsGrid) modsGrid.style.display = 'none';
+        if (installedContainer) installedContainer.style.display = 'none';
+        if (logsContainer) {
+          logsContainer.style.display = 'flex';
+          const wrapper = document.getElementById('mc-logs-terminal-wrapper');
+          if (wrapper) wrapper.scrollTop = wrapper.scrollHeight;
+        }
       } else {
         if (browseToolbar) browseToolbar.style.display = 'flex';
         if (modsGrid) modsGrid.style.display = 'grid';
         if (installedContainer) installedContainer.style.display = 'none';
+        if (logsContainer) logsContainer.style.display = 'none';
         searchModrinthMods();
       }
     });
   });
 
-  // Search & Filters
+  // Installed Mods Filter Pills
+  document.querySelectorAll('.mc-filter-pill').forEach(pill => {
+    pill.addEventListener('click', (e) => {
+      sfx.play('click');
+      document.querySelectorAll('.mc-filter-pill').forEach(p => p.classList.remove('active'));
+      const target = e.currentTarget;
+      target.classList.add('active');
+      mcState.installedFilter = target.dataset.modFilter;
+      renderInstalledModsList();
+    });
+  });
+
+  // Installed Mods Search Filter
+  installedSearchInput?.addEventListener('input', (e) => {
+    mcState.installedSearch = e.target.value.toLowerCase().trim();
+    renderInstalledModsList();
+  });
+
+  // Enable All / Disable All
+  btnEnableAll?.addEventListener('click', async () => {
+    sfx.play('click');
+    const instId = mcState.activeInstance?.id;
+    await window.api.mcToggleAllMods(true, instId);
+    showToast('All Mods Enabled', 'Enabled all mods in active instance.', 'success', 2000);
+    loadInstalledMods();
+  });
+
+  btnDisableAll?.addEventListener('click', async () => {
+    sfx.play('click');
+    const instId = mcState.activeInstance?.id;
+    await window.api.mcToggleAllMods(false, instId);
+    showToast('All Mods Disabled', 'Disabled all mods in active instance.', 'info', 2000);
+    loadInstalledMods();
+  });
+
+  // Check Mod Updates
+  btnCheckUpdates?.addEventListener('click', async () => {
+    sfx.play('click');
+    const icon = document.getElementById('mc-icon-check-updates');
+    if (icon) icon.classList.add('spin-icon');
+    showToast('Checking Mod Updates', 'Scanning installed mods against Modrinth...', 'info', 3000);
+
+    const instId = mcState.activeInstance?.id;
+    const res = await window.api.mcCheckModUpdates(instId);
+    if (icon) icon.classList.remove('spin-icon');
+
+    if (res && res.updates) {
+      mcState.modUpdates = res.updates;
+      renderInstalledModsList();
+      if (res.updates.length > 0) {
+        showToast('Updates Found!', `${res.updates.length} mod(s) have updates available.`, 'success', 4000);
+      } else {
+        showToast('All Mods Up to Date', 'All installed mods match latest versions.', 'success', 3000);
+      }
+    }
+  });
+
+  // Drag and Drop Zone
+  if (dropzone) {
+    dropzone.addEventListener('click', () => {
+      fileInput?.click();
+    });
+
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.add('dragover');
+    });
+
+    dropzone.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.remove('dragover');
+    });
+
+    dropzone.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.remove('dragover');
+
+      const files = Array.from(e.dataTransfer?.files || []);
+      const filePaths = files
+        .map(f => f.path)
+        .filter(p => p && (p.endsWith('.jar') || p.endsWith('.zip')));
+
+      if (filePaths.length > 0) {
+        sfx.play('action');
+        const instId = mcState.activeInstance?.id;
+        const res = await window.api.mcInstallLocalJars(filePaths, instId);
+        if (res && res.success) {
+          sfx.play('download_complete');
+          showToast('Mods Installed!', `Successfully installed ${res.count} mod file(s).`, 'success', 3500);
+          loadInstalledMods();
+        }
+      } else {
+        showToast('Invalid File Type', 'Please drop .jar or .zip Minecraft mod files.', 'warning', 3000);
+      }
+    });
+  }
+
+  fileInput?.addEventListener('change', async (e) => {
+    const files = Array.from(e.target.files || []);
+    const filePaths = files.map(f => f.path).filter(p => p && (p.endsWith('.jar') || p.endsWith('.zip')));
+    if (filePaths.length > 0) {
+      const instId = mcState.activeInstance?.id;
+      const res = await window.api.mcInstallLocalJars(filePaths, instId);
+      if (res && res.success) {
+        sfx.play('download_complete');
+        showToast('Mods Installed!', `Successfully installed ${res.count} mod file(s).`, 'success', 3500);
+        loadInstalledMods();
+      }
+    }
+  });
+
+  // Game Logs Controller
+  document.querySelectorAll('.mc-log-filter-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      sfx.play('click');
+      document.querySelectorAll('.mc-log-filter-btn').forEach(b => b.classList.remove('active'));
+      const target = e.currentTarget;
+      target.classList.add('active');
+      mcState.logFilter = target.dataset.level;
+      filterConsoleLogs();
+    });
+  });
+
+  logAutoScrollCheck?.addEventListener('change', (e) => {
+    mcState.autoScrollLogs = e.target.checked;
+  });
+
+  btnCopyLogs?.addEventListener('click', () => {
+    sfx.play('click');
+    const raw = mcState.rawLogLines.join('\n');
+    navigator.clipboard.writeText(raw).then(() => {
+      showToast('Logs Copied', 'Console logs copied to clipboard.', 'success', 2500);
+    });
+  });
+
+  btnUploadMclogs?.addEventListener('click', async () => {
+    sfx.play('click');
+    const raw = mcState.rawLogLines.join('\n');
+    if (!raw.trim()) {
+      showToast('Console Empty', 'No logs to share yet.', 'warning', 2500);
+      return;
+    }
+
+    showToast('Uploading to mclo.gs', 'Publishing log to secure pastebin...', 'info', 3000);
+    const res = await window.api.mcUploadLog(raw);
+    if (res && res.success && res.url) {
+      navigator.clipboard.writeText(res.url);
+      sfx.play('action');
+      showToast('Log Shared!', `Link copied to clipboard: ${res.url}`, 'success', 6000);
+    } else {
+      showToast('Upload Failed', res?.error || 'Could not upload to mclo.gs', 'error', 4000);
+    }
+  });
+
+  btnClearLogs?.addEventListener('click', () => {
+    sfx.play('click');
+    mcState.rawLogLines = [];
+    const terminal = document.getElementById('mc-logs-terminal');
+    const counter = document.getElementById('mc-logs-line-counter');
+    if (terminal) terminal.innerHTML = '';
+    if (counter) counter.innerText = '0 lines';
+    appendGameLog('[ANTIGRAVITY] Console cleared.');
+  });
+
+  // Search & Filters for Modrinth
   searchInput?.addEventListener('input', (e) => {
     mcState.searchQuery = e.target.value.trim();
     if (searchClear) searchClear.style.display = mcState.searchQuery ? 'block' : 'none';
@@ -2187,13 +2650,6 @@ async function setupMinecraftHub() {
     launchMinecraft();
   });
 
-  // Console Drawer Toggle
-  consoleToggle?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const drawer = document.getElementById('mc-console-drawer');
-    if (drawer) drawer.classList.toggle('collapsed');
-  });
-
   // Progress Listeners
   window.api.onMcLaunchProgress((data) => {
     const progressBox = document.getElementById('mc-launch-progress-box');
@@ -2205,12 +2661,16 @@ async function setupMinecraftHub() {
     if (percentEl) percentEl.innerText = `${data.percent || 0}%`;
     if (barFill) barFill.style.width = `${data.percent || 0}%`;
     if (statusText) {
-      if (data.type === 'assets') {
+      if (data.type === 'java') {
+        statusText.innerHTML = `<i class="fa-solid fa-mug-saucer spin-icon"></i> ${escapeHtml(data.task || 'Preparing Java Runtime...')}`;
+      } else if (data.type === 'loader') {
+        statusText.innerHTML = `<i class="fa-solid fa-gear spin-icon"></i> ${escapeHtml(data.task || 'Preparing Loader...')}`;
+      } else if (data.type === 'assets') {
         statusText.innerHTML = `<i class="fa-solid fa-cloud-arrow-down spin-icon"></i> Downloading Assets (${data.current || 0}/${data.total || 0})...`;
       } else if (data.type === 'natives' || data.type === 'classes') {
-        statusText.innerHTML = `<i class="fa-solid fa-gear spin-icon"></i> Unpacking Libraries & Natives...`;
+        statusText.innerHTML = `<i class="fa-solid fa-layer-group spin-icon"></i> Unpacking Libraries & Natives...`;
       } else {
-        statusText.innerHTML = `<i class="fa-solid fa-arrows-rotate spin-icon"></i> Loading ${data.name || data.task || 'Minecraft'}...`;
+        statusText.innerHTML = `<i class="fa-solid fa-arrows-rotate spin-icon"></i> Loading ${escapeHtml(data.name || data.task || 'Minecraft')}...`;
       }
     }
   });
@@ -2228,11 +2688,7 @@ async function setupMinecraftHub() {
   });
 
   window.api.onMcLog((log) => {
-    const consoleOutput = document.getElementById('mc-console-output');
-    if (consoleOutput) {
-      consoleOutput.innerText += `\n${log}`;
-      consoleOutput.scrollTop = consoleOutput.scrollHeight;
-    }
+    appendGameLog(log);
   });
 
   window.api.onMcClosed((data) => {
@@ -2246,12 +2702,502 @@ async function setupMinecraftHub() {
     if (progressBox) {
       setTimeout(() => { progressBox.style.display = 'none'; }, 2000);
     }
+    appendGameLog(`[ANTIGRAVITY] Game process exited with code ${data?.exitCode || 0}.`);
     showToast('Minecraft Closed', `Game process finished (code ${data?.exitCode || 0}).`, 'info', 3000);
   });
 
   // Initial load
   loadInstalledMods();
   searchModrinthMods();
+}
+
+// ========================================================
+// Advanced Launch Options Dialog Controller
+// ========================================================
+function openAdvancedOptions() {
+  const modal = document.getElementById('modal-mc-advanced-options');
+  const titleEl = document.getElementById('mc-adv-inst-title');
+  const jvmInput = document.getElementById('mc-adv-jvm-args');
+  const javaPathInput = document.getElementById('mc-adv-java-path');
+  const widthInput = document.getElementById('mc-adv-width');
+  const heightInput = document.getElementById('mc-adv-height');
+  const fsCheck = document.getElementById('mc-adv-fullscreen');
+  const serverInput = document.getElementById('mc-adv-server');
+  const btnBrowseJava = document.getElementById('mc-adv-btn-browse-java');
+  const btnClearJava = document.getElementById('mc-adv-btn-clear-java');
+  const btnSave = document.getElementById('mc-adv-btn-save');
+
+  const inst = mcState.activeInstance;
+  if (!inst) return;
+
+  if (titleEl) titleEl.innerText = inst.name;
+  if (jvmInput) jvmInput.value = inst.jvmArgs || '';
+  if (javaPathInput) javaPathInput.value = inst.customJavaPath || '';
+  if (widthInput) widthInput.value = inst.windowWidth || 1280;
+  if (heightInput) heightInput.value = inst.windowHeight || 720;
+  if (fsCheck) fsCheck.checked = Boolean(inst.fullscreen);
+  if (serverInput) serverInput.value = inst.serverAddress || '';
+
+  btnBrowseJava.onclick = async () => {
+    const res = await window.api.mcBrowseFile('java');
+    if (res && res.filePath) {
+      javaPathInput.value = res.filePath;
+    }
+  };
+
+  btnClearJava.onclick = () => {
+    javaPathInput.value = '';
+  };
+
+  btnSave.onclick = async () => {
+    sfx.play('action');
+    const updates = {
+      jvmArgs: jvmInput?.value?.trim() || '',
+      customJavaPath: javaPathInput?.value?.trim() || '',
+      windowWidth: parseInt(widthInput?.value || '1280', 10),
+      windowHeight: parseInt(heightInput?.value || '720', 10),
+      fullscreen: Boolean(fsCheck?.checked),
+      serverAddress: serverInput?.value?.trim() || ''
+    };
+
+    mcState.activeInstance = { ...mcState.activeInstance, ...updates };
+    await window.api.mcUpdateInstance(inst.id, updates);
+    closeActiveModal();
+    showToast('Settings Saved', `Updated launch options for "${inst.name}".`, 'success', 3000);
+  };
+
+  showModal(modal);
+}
+
+// ========================================================
+// Offline Player & Skin Studio Controller
+// ========================================================
+const SKIN_PRESETS = [
+  { id: 'Steve', name: 'Steve', model: 'classic', avatar: 'https://mc-heads.net/avatar/Steve/128', body: 'https://mc-heads.net/body/Steve/256' },
+  { id: 'Alex', name: 'Alex', model: 'slim', avatar: 'https://mc-heads.net/avatar/Alex/128', body: 'https://mc-heads.net/body/Alex/256' },
+  { id: 'Technoblade', name: 'Technoblade', model: 'classic', avatar: 'https://mc-heads.net/avatar/Technoblade/128', body: 'https://mc-heads.net/body/Technoblade/256' },
+  { id: 'Notch', name: 'Notch', model: 'classic', avatar: 'https://mc-heads.net/avatar/Notch/128', body: 'https://mc-heads.net/body/Notch/256' },
+  { id: 'Dream', name: 'Dream', model: 'classic', avatar: 'https://mc-heads.net/avatar/Dream/128', body: 'https://mc-heads.net/body/Dream/256' },
+  { id: 'Herobrine', name: 'Herobrine', model: 'classic', avatar: 'https://mc-heads.net/avatar/Herobrine/128', body: 'https://mc-heads.net/body/Herobrine/256' },
+  { id: 'DanTDM', name: 'DanTDM', model: 'classic', avatar: 'https://mc-heads.net/avatar/DanTDM/128', body: 'https://mc-heads.net/body/DanTDM/256' },
+  { id: 'MumboJumbo', name: 'MumboJumbo', model: 'classic', avatar: 'https://mc-heads.net/avatar/MumboJumbo/128', body: 'https://mc-heads.net/body/MumboJumbo/256' }
+];
+
+let skinStudioState = {
+  source: 'preset', // 'preset', 'username', 'custom'
+  value: 'Steve',
+  model: 'classic',
+  customDataUri: null,
+  extractedFaceUri: null
+};
+
+function extractFaceFromSkinDataUri(dataUri) {
+  return new Promise((resolve) => {
+    if (!dataUri || !dataUri.startsWith('data:image/png;base64,')) return resolve(dataUri);
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = 64;
+        canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = false;
+
+        // Base face (x:8, y:8, w:8, h:8)
+        ctx.drawImage(img, 8, 8, 8, 8, 0, 0, 64, 64);
+        // Hat / hair overlay (x:40, y:8, w:8, h:8)
+        ctx.drawImage(img, 40, 8, 8, 8, 0, 0, 64, 64);
+
+        resolve(canvas.toDataURL('image/png'));
+      } catch (e) {
+        resolve(dataUri);
+      }
+    };
+    img.onerror = () => resolve(dataUri);
+    img.src = dataUri;
+  });
+}
+
+function openSkinStudio() {
+  const modal = document.getElementById('modal-mc-offline-skin-studio');
+  const nameInput = document.getElementById('mc-skin-input-name');
+  const modelClassic = document.getElementById('mc-model-classic');
+  const modelSlim = document.getElementById('mc-model-slim');
+  const presetsGrid = document.getElementById('mc-presets-grid');
+  const previewBody = document.getElementById('mc-skin-preview-body-img');
+  const previewFace = document.getElementById('mc-skin-preview-face-img');
+  const previewName = document.getElementById('mc-skin-preview-name-disp');
+  const previewModel = document.getElementById('mc-skin-preview-model-disp');
+  const previewTag = document.getElementById('mc-skin-preview-type');
+  const fetchInput = document.getElementById('mc-skin-fetch-name');
+  const btnFetch = document.getElementById('mc-btn-fetch-skin');
+  const dropzoneSkin = document.getElementById('mc-skin-file-dropzone');
+  const uploadFilename = document.getElementById('mc-skin-upload-filename');
+  const btnApply = document.getElementById('mc-btn-apply-offline-skin');
+
+  const currentProf = mcState.profile;
+  const initialName = currentProf?.gamertag || 'Player';
+  nameInput.value = initialName;
+
+  skinStudioState = {
+    source: currentProf?.skinSource || 'preset',
+    value: currentProf?.skinValue || (initialName !== 'Player' ? initialName : 'Steve'),
+    model: currentProf?.skinModel || 'classic',
+    customDataUri: currentProf?.rawSkinDataUri || null,
+    extractedFaceUri: currentProf?.skinUrl?.startsWith('data:') ? currentProf.skinUrl : null
+  };
+
+  if (skinStudioState.model === 'slim') modelSlim.checked = true;
+  else modelClassic.checked = true;
+
+  const updatePreviewUI = () => {
+    const enteredName = nameInput.value.trim() || 'Player';
+    if (previewName) previewName.innerText = enteredName;
+    if (previewModel) previewModel.innerText = skinStudioState.model === 'slim' ? 'Slim 3px Arms (Alex)' : 'Classic 4px Arms (Steve)';
+
+    if (skinStudioState.source === 'custom' && skinStudioState.customDataUri) {
+      if (previewBody) previewBody.src = skinStudioState.extractedFaceUri || skinStudioState.customDataUri;
+      if (previewFace) previewFace.src = skinStudioState.extractedFaceUri || skinStudioState.customDataUri;
+      if (previewTag) previewTag.innerText = 'Custom Skin File';
+    } else {
+      const skinKey = encodeURIComponent(skinStudioState.value || 'Steve');
+      if (previewBody) previewBody.src = `https://mc-heads.net/body/${skinKey}/256`;
+      if (previewFace) previewFace.src = `https://mc-heads.net/avatar/${skinKey}/128`;
+      if (previewTag) previewTag.innerText = `${skinStudioState.value} (${skinStudioState.source})`;
+    }
+  };
+
+  // Render presets
+  presetsGrid.innerHTML = '';
+  SKIN_PRESETS.forEach(p => {
+    const item = document.createElement('div');
+    item.className = `mc-preset-item ${skinStudioState.value === p.id ? 'active' : ''}`;
+    item.innerHTML = `
+      <img class="mc-preset-img" src="${p.avatar}" alt="${p.name}" onerror="this.src='https://mc-heads.net/avatar/Steve/64';">
+      <span class="mc-preset-label">${p.name}</span>
+    `;
+
+    item.onclick = () => {
+      sfx.play('click');
+      document.querySelectorAll('.mc-preset-item').forEach(el => el.classList.remove('active'));
+      item.classList.add('active');
+      skinStudioState.source = 'preset';
+      skinStudioState.value = p.id;
+      skinStudioState.customDataUri = null;
+      skinStudioState.extractedFaceUri = null;
+      updatePreviewUI();
+    };
+
+    presetsGrid.appendChild(item);
+  });
+
+  // Tab switching inside Skin Studio
+  document.querySelectorAll('.mc-skin-subtab').forEach(tab => {
+    tab.onclick = (e) => {
+      sfx.play('hover');
+      document.querySelectorAll('.mc-skin-subtab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      const target = tab.dataset.skintab;
+
+      document.getElementById('mc-skin-tab-presets').style.display = target === 'presets' ? 'block' : 'none';
+      document.getElementById('mc-skin-tab-username').style.display = target === 'username' ? 'block' : 'none';
+      document.getElementById('mc-skin-tab-upload').style.display = target === 'upload' ? 'block' : 'none';
+    };
+  });
+
+  nameInput.oninput = updatePreviewUI;
+
+  modelClassic.onchange = () => { skinStudioState.model = 'classic'; updatePreviewUI(); };
+  modelSlim.onchange = () => { skinStudioState.model = 'slim'; updatePreviewUI(); };
+
+  btnFetch.onclick = () => {
+    const uname = fetchInput?.value?.trim();
+    if (!uname) {
+      showToast('Empty Username', 'Please enter a Minecraft username.', 'warning', 2500);
+      return;
+    }
+    sfx.play('click');
+    skinStudioState.source = 'username';
+    skinStudioState.value = uname;
+    skinStudioState.customDataUri = null;
+    skinStudioState.extractedFaceUri = null;
+    showToast('Skin Loaded', `Loaded skin for ${uname}.`, 'info', 2000);
+    updatePreviewUI();
+  };
+
+  dropzoneSkin.onclick = async () => {
+    const res = await window.api.mcBrowseFile('skin');
+    if (res && res.dataUri) {
+      skinStudioState.source = 'custom';
+      skinStudioState.customDataUri = res.dataUri;
+      skinStudioState.extractedFaceUri = await extractFaceFromSkinDataUri(res.dataUri);
+      if (uploadFilename) uploadFilename.innerText = res.filePath ? res.filePath.split('\\').pop() : 'Custom Skin Loaded';
+      showToast('Skin Uploaded', 'Custom skin file loaded!', 'success', 2500);
+      updatePreviewUI();
+    }
+  };
+
+  btnApply.onclick = async () => {
+    sfx.play('action');
+    const uname = nameInput.value.trim() || 'Player';
+    let faceUri = skinStudioState.extractedFaceUri;
+    if (skinStudioState.source === 'custom' && !faceUri && skinStudioState.customDataUri) {
+      faceUri = await extractFaceFromSkinDataUri(skinStudioState.customDataUri);
+    }
+
+    const res = await window.api.mcSetOfflineSkin({
+      username: uname,
+      skinSource: skinStudioState.source,
+      skinValue: skinStudioState.value,
+      skinModel: skinStudioState.model,
+      skinDataUri: skinStudioState.customDataUri
+    });
+
+    if (res && res.success) {
+      mcState.profile = res.profile;
+      if (faceUri && skinStudioState.source === 'custom') {
+        mcState.profile.skinUrl = faceUri;
+        mcState.profile.rawSkinDataUri = skinStudioState.customDataUri;
+      }
+      renderMinecraftAccount();
+      closeActiveModal();
+      showToast('Skin Applied!', `Offline profile & skin updated for "${uname}".`, 'success', 3500);
+    }
+  };
+
+  updatePreviewUI();
+  showModal(modal);
+}
+
+// ========================================================
+// Mod & Modpack Version & Target Instance Picker Controller
+// ========================================================
+async function openModVersionPicker(project) {
+  const modal = document.getElementById('modal-mc-mod-version-picker');
+  const titleEl = document.getElementById('mc-picker-title');
+  const iconEl = document.getElementById('mc-picker-icon');
+  const nameEl = document.getElementById('mc-picker-project-name');
+  const descEl = document.getElementById('mc-picker-project-desc');
+  const tagsEl = document.getElementById('mc-picker-tags');
+  const instSelect = document.getElementById('mc-picker-instance-select');
+  const versionsContainer = document.getElementById('mc-picker-versions-container');
+
+  if (!project || !modal) return;
+
+  const isModpack = project.project_type === 'modpack';
+  titleEl.innerText = isModpack ? 'Select Modpack Version & Target' : 'Select Mod Version & Target';
+  if (nameEl) nameEl.innerText = project.title || 'Project';
+  if (descEl) descEl.innerText = project.description || '';
+  if (iconEl) iconEl.src = project.icon_url || 'https://mc-heads.net/avatar/Steve/64';
+
+  if (tagsEl) {
+    tagsEl.innerHTML = (project.categories || []).map(c => `<span class="mc-tag">${escapeHtml(c)}</span>`).join('');
+  }
+
+  // Populate instances dropdown
+  if (instSelect) {
+    instSelect.innerHTML = '';
+    const currentInstId = mcState.activeInstance?.id;
+    mcState.instancesData.instances.forEach(inst => {
+      const opt = document.createElement('option');
+      opt.value = inst.id;
+      opt.innerText = `${inst.name} (${inst.version} - ${inst.loader})`;
+      if (inst.id === currentInstId) opt.selected = true;
+      instSelect.appendChild(opt);
+    });
+
+    if (isModpack) {
+      const newOpt = document.createElement('option');
+      newOpt.value = 'NEW_INSTANCE';
+      newOpt.innerText = `+ Create New Instance for "${project.title}"`;
+      instSelect.appendChild(newOpt);
+    }
+  }
+
+  versionsContainer.innerHTML = '<div class="mc-picker-loading"><i class="fa-solid fa-arrows-rotate spin-icon"></i> Fetching all available versions from Modrinth...</div>';
+  showModal(modal);
+
+  try {
+    const rawVersions = await window.api.mcGetProjectVersions(project.project_id || project.slug);
+    if (!rawVersions || rawVersions.length === 0) {
+      versionsContainer.innerHTML = '<div class="mc-picker-loading"><i class="fa-solid fa-circle-exclamation"></i> No versions available for this project.</div>';
+      return;
+    }
+
+    let activeChannelFilter = 'all';
+
+    const renderVersionsList = () => {
+      let filtered = rawVersions;
+      if (activeChannelFilter !== 'all') {
+        filtered = filtered.filter(v => (v.version_type || 'release').toLowerCase() === activeChannelFilter);
+      }
+
+      if (filtered.length === 0) {
+        versionsContainer.innerHTML = '<div class="mc-picker-loading">No versions matching selected channel filter.</div>';
+        return;
+      }
+
+      versionsContainer.innerHTML = '';
+      filtered.forEach(v => {
+        const row = document.createElement('div');
+        row.className = 'mc-version-row';
+
+        const type = (v.version_type || 'release').toLowerCase();
+        const badgeClass = type === 'alpha' ? 'mc-version-badge-alpha' : type === 'beta' ? 'mc-version-badge-beta' : 'mc-version-badge-release';
+
+        const gameVers = (v.game_versions || []).slice(0, 4).join(', ');
+        const loaders = (v.loaders || []).join(', ');
+        const file = v.files?.find(f => f.primary || f.filename?.endsWith('.mrpack') || f.filename?.endsWith('.jar')) || v.files?.[0];
+        const sizeMb = file?.size ? (file.size / (1024 * 1024)).toFixed(1) + ' MB' : '';
+
+        row.innerHTML = `
+          <div class="mc-version-meta-left">
+            <div class="mc-version-title-line">
+              <span class="mc-version-number">${escapeHtml(v.name || v.version_number)}</span>
+              <span class="${badgeClass}">${escapeHtml(type.toUpperCase())}</span>
+              ${loaders ? `<span class="mc-installed-loader-tag">${escapeHtml(loaders)}</span>` : ''}
+            </div>
+            <div class="mc-version-subline">
+              <span><i class="fa-solid fa-gamepad"></i> MC ${escapeHtml(gameVers)}</span>
+              ${sizeMb ? `<span><i class="fa-solid fa-file"></i> ${sizeMb}</span>` : ''}
+              <span><i class="fa-solid fa-download"></i> ${v.downloads || 0}</span>
+            </div>
+          </div>
+          <button class="primary-btn btn-sm btn-success mc-btn-install-version" style="white-space: nowrap;">
+            <i class="fa-solid fa-download"></i> Install
+          </button>
+        `;
+
+        const btnInstall = row.querySelector('.mc-btn-install-version');
+        btnInstall.onclick = async () => {
+          if (!file?.url) {
+            showToast('Download Error', 'No downloadable file in this version.', 'error', 3000);
+            return;
+          }
+
+          sfx.play('click');
+          btnInstall.disabled = true;
+          btnInstall.innerHTML = '<i class="fa-solid fa-arrows-rotate spin-icon"></i> Installing...';
+
+          const targetInstId = instSelect.value;
+          if (isModpack) {
+            const res = await window.api.mcInstallModpack(file.url, project.title);
+            if (res && res.success) {
+              sfx.play('download_complete');
+              closeActiveModal();
+              mcState.instancesData = await window.api.mcGetInstances();
+              mcState.activeInstance = res.instance;
+              renderMinecraftInstances();
+              loadInstalledMods();
+              showToast('Modpack Ready!', `Installed version "${v.version_number}".`, 'success', 4000);
+            } else {
+              btnInstall.disabled = false;
+              btnInstall.innerHTML = '<i class="fa-solid fa-download"></i> Install';
+              showToast('Install Failed', res?.error || 'Modpack installation failed.', 'error', 4000);
+            }
+          } else {
+            const res = await window.api.mcInstallMod(file.url, file.filename, project.project_type || 'mod', targetInstId);
+            if (res && res.success) {
+              sfx.play('download_complete');
+              btnInstall.className = 'secondary-btn btn-sm';
+              btnInstall.innerHTML = '<i class="fa-solid fa-check"></i> Installed';
+              showToast('Mod Installed!', `Added "${project.title}" ${v.version_number} to instance.`, 'success', 3000);
+              loadInstalledMods();
+            } else {
+              btnInstall.disabled = false;
+              btnInstall.innerHTML = '<i class="fa-solid fa-download"></i> Install';
+              showToast('Install Failed', res?.error || 'Mod installation failed.', 'error', 4000);
+            }
+          }
+        };
+
+        versionsContainer.appendChild(row);
+      });
+    };
+
+    // Filter pill buttons
+    document.querySelectorAll('#modal-mc-mod-version-picker .mc-filter-pill').forEach(pill => {
+      pill.onclick = () => {
+        sfx.play('click');
+        document.querySelectorAll('#modal-mc-mod-version-picker .mc-filter-pill').forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+        activeChannelFilter = pill.dataset.channel;
+        renderVersionsList();
+      };
+    });
+
+    renderVersionsList();
+  } catch (err) {
+    versionsContainer.innerHTML = `<div class="mc-picker-loading"><i class="fa-solid fa-triangle-exclamation"></i> Error loading versions: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function appendGameLog(rawLog) {
+  if (!rawLog) return;
+  const terminal = document.getElementById('mc-logs-terminal');
+  const counter = document.getElementById('mc-logs-line-counter');
+  const wrapper = document.getElementById('mc-logs-terminal-wrapper');
+
+  const lines = rawLog.split(/\r?\n/).filter(l => l.length > 0);
+
+  lines.forEach(line => {
+    mcState.rawLogLines.push(line);
+
+    if (terminal) {
+      const lineEl = document.createElement('div');
+      let levelClass = 'mc-log-info';
+      let tag = '[INFO]';
+      let time = new Date().toTimeString().split(' ')[0];
+
+      const lower = line.toLowerCase();
+      if (lower.includes('error') || lower.includes('fatal') || lower.includes('exception') || lower.includes('crash') || lower.includes('severe')) {
+        levelClass = 'mc-log-error';
+        tag = '[ERROR]';
+      } else if (lower.includes('warn') || lower.includes('warning')) {
+        levelClass = 'mc-log-warn';
+        tag = '[WARN]';
+      }
+
+      lineEl.className = `mc-log-line ${levelClass}`;
+      lineEl.dataset.level = levelClass.replace('mc-log-', '');
+
+      // Apply current log filter
+      if (mcState.logFilter !== 'all' && lineEl.dataset.level !== mcState.logFilter) {
+        lineEl.style.display = 'none';
+      }
+
+      lineEl.innerHTML = `
+        <span class="mc-log-time">[${time}]</span>
+        <span class="mc-log-tag">${tag}</span>
+        <span class="mc-log-msg">${escapeHtml(line)}</span>
+      `;
+
+      terminal.appendChild(lineEl);
+    }
+  });
+
+  if (counter) {
+    counter.innerText = `${mcState.rawLogLines.length} lines`;
+  }
+
+  if (mcState.autoScrollLogs && wrapper) {
+    wrapper.scrollTop = wrapper.scrollHeight;
+  }
+}
+
+function filterConsoleLogs() {
+  const terminal = document.getElementById('mc-logs-terminal');
+  if (!terminal) return;
+
+  const lines = terminal.querySelectorAll('.mc-log-line');
+  lines.forEach(line => {
+    if (mcState.logFilter === 'all' || line.dataset.level === mcState.logFilter) {
+      line.style.display = 'flex';
+    } else {
+      line.style.display = 'none';
+    }
+  });
 }
 
 function renderMinecraftInstances() {
@@ -2269,6 +3215,11 @@ function renderMinecraftInstances() {
     selectInstance.appendChild(opt);
   });
 
+  const instBadge = document.getElementById('mc-installed-inst-badge');
+  if (instBadge && mcState.activeInstance) {
+    instBadge.innerText = mcState.activeInstance.name;
+  }
+
   syncConfigFromActiveInstance();
 }
 
@@ -2277,9 +3228,13 @@ function syncConfigFromActiveInstance() {
   const selectLoader = document.getElementById('mc-select-loader');
   const ramSlider = document.getElementById('mc-ram-slider');
   const ramDisplay = document.getElementById('mc-ram-display');
+  const instBadge = document.getElementById('mc-installed-inst-badge');
 
   if (!mcState.activeInstance) return;
 
+  if (instBadge) {
+    instBadge.innerText = mcState.activeInstance.name;
+  }
   if (selectVersion && mcState.activeInstance.version) {
     selectVersion.value = mcState.activeInstance.version;
   }
@@ -2299,21 +3254,123 @@ function renderMinecraftAccount() {
   const btnLoginMs = document.getElementById('mc-btn-login-ms');
   const btnOffline = document.getElementById('mc-btn-offline-mode');
   const btnLogout = document.getElementById('mc-btn-logout');
+  const btnSwitch = document.getElementById('mc-btn-switch-account');
 
   if (mcState.profile) {
-    if (avatar) avatar.src = mcState.profile.skinUrl || 'https://crafatar.com/avatars/steve?overlay';
+    if (avatar) avatar.src = mcState.profile.skinUrl || 'https://mc-heads.net/avatar/Steve/128';
     if (nameEl) nameEl.innerText = mcState.profile.gamertag || 'Player';
-    if (typeEl) typeEl.innerText = mcState.profile.isOffline ? 'Offline Profile' : 'Microsoft Account';
+    if (typeEl) {
+      if (mcState.profile.isOffline) {
+        typeEl.innerHTML = '<i class="fa-solid fa-pen-to-square"></i> Offline Profile (Change skin)';
+        typeEl.style.cursor = 'pointer';
+        typeEl.onclick = () => openSkinStudio();
+      } else {
+        typeEl.innerHTML = '<i class="fa-brands fa-microsoft"></i> Microsoft Account';
+        typeEl.style.cursor = 'default';
+        typeEl.onclick = null;
+      }
+    }
     if (btnLoginMs) btnLoginMs.style.display = 'none';
     if (btnOffline) btnOffline.style.display = 'none';
     if (btnLogout) btnLogout.style.display = 'inline-flex';
+    if (btnSwitch) btnSwitch.style.display = 'inline-flex';
   } else {
-    if (avatar) avatar.src = 'https://crafatar.com/avatars/steve?overlay';
+    if (avatar) avatar.src = 'https://mc-heads.net/avatar/Steve/128';
     if (nameEl) nameEl.innerText = 'Not Logged In';
-    if (typeEl) typeEl.innerText = 'Microsoft Account';
+    if (typeEl) {
+      typeEl.innerText = 'Microsoft / Offline';
+      typeEl.style.cursor = 'default';
+      typeEl.onclick = null;
+    }
     if (btnLoginMs) btnLoginMs.style.display = 'inline-flex';
     if (btnOffline) btnOffline.style.display = 'inline-flex';
     if (btnLogout) btnLogout.style.display = 'none';
+    if (btnSwitch) btnSwitch.style.display = 'none';
+  }
+}
+
+async function openMinecraftAccountManagerModal() {
+  const modal = document.getElementById('modal-mc-account-manager');
+  const grid = document.getElementById('mc-accounts-grid');
+  if (!modal || !grid) return;
+
+  grid.innerHTML = '<div class="library-loading"><i class="fa-solid fa-arrows-rotate spin-icon"></i> Loading accounts...</div>';
+  showModal(modal);
+
+  try {
+    const data = await window.api.mcGetAccounts();
+    const activeId = data.activeAccountId;
+    const accounts = data.accounts || [];
+
+    grid.innerHTML = '';
+    if (accounts.length === 0) {
+      grid.innerHTML = '<div class="library-empty"><p>No saved accounts yet. Add a Microsoft or Offline profile!</p></div>';
+      return;
+    }
+
+    accounts.forEach(acc => {
+      const item = document.createElement('div');
+      const isActive = acc.id === activeId;
+      item.className = `mc-account-item ${isActive ? 'active' : ''}`;
+
+      const avatarSrc = acc.skinUrl || 'https://mc-heads.net/avatar/Steve/128';
+      const isMs = acc.type === 'microsoft' || !acc.isOffline;
+      const typeBadge = isMs
+        ? `<span class="mc-account-type-badge ms"><i class="fa-brands fa-microsoft"></i> Microsoft</span>`
+        : `<span class="mc-account-type-badge offline"><i class="fa-solid fa-user"></i> Offline</span>`;
+
+      const actionHtml = isActive
+        ? `<span class="mc-account-active-tag"><i class="fa-solid fa-circle-check"></i> Active</span>`
+        : `<button class="primary-btn btn-sm btn-success mc-btn-switch-to-account">Switch</button>`;
+
+      item.innerHTML = `
+        <img class="mc-account-item-avatar" src="${escapeHtml(avatarSrc)}" alt="${escapeHtml(acc.gamertag)}" onerror="this.src='https://mc-heads.net/avatar/Steve/128';">
+        <div class="mc-account-item-info">
+          <div class="mc-account-item-name" title="${escapeHtml(acc.gamertag)}">${escapeHtml(acc.gamertag)}</div>
+          <div class="mc-account-item-meta">
+            ${typeBadge}
+          </div>
+        </div>
+        <div class="mc-account-item-actions">
+          ${actionHtml}
+          ${accounts.length > 1 ? `<button class="icon-only-btn text-danger mc-btn-delete-acc" title="Remove account"><i class="fa-solid fa-trash-can"></i></button>` : ''}
+        </div>
+      `;
+
+      const switchBtn = item.querySelector('.mc-btn-switch-to-account');
+      if (switchBtn) {
+        switchBtn.onclick = async () => {
+          sfx.play('action');
+          const res = await window.api.mcSetActiveAccount(acc.id);
+          if (res && res.success) {
+            mcState.profile = res.activeAccount;
+            renderMinecraftAccount();
+            openMinecraftAccountManagerModal();
+            showToast('Account Switched!', `Now playing as "${acc.gamertag}".`, 'success', 3000);
+          }
+        };
+      }
+
+      const delBtn = item.querySelector('.mc-btn-delete-acc');
+      if (delBtn) {
+        delBtn.onclick = async () => {
+          if (confirm(`Remove account "${acc.gamertag}" from your saved accounts?`)) {
+            sfx.play('click');
+            const res = await window.api.mcDeleteAccount(acc.id);
+            if (res && res.success) {
+              mcState.profile = res.activeAccount;
+              renderMinecraftAccount();
+              openMinecraftAccountManagerModal();
+              showToast('Account Removed', `Removed "${acc.gamertag}".`, 'info', 2500);
+            }
+          }
+        };
+      }
+
+      grid.appendChild(item);
+    });
+  } catch (err) {
+    grid.innerHTML = `<div class="library-empty text-danger"><p>Error loading accounts: ${escapeHtml(err.message)}</p></div>`;
   }
 }
 
@@ -2391,16 +3448,34 @@ function renderModrinthCards(hits) {
           <span class="mc-downloads-chip"><i class="fa-solid fa-download"></i> ${downloadsFormatted}</span>
           ${tagsHtml}
         </div>
-        <button class="mc-install-btn" data-project-id="${escapeHtml(item.project_id || item.slug)}" data-project-type="${escapeHtml(item.project_type || 'mod')}">
-          ${btnLabel}
-        </button>
+        <div style="display: flex; gap: 0.4rem; align-items: center;">
+          <button class="secondary-btn btn-sm mc-versions-btn" title="View all versions, loaders & changelogs" style="padding: 0.35rem 0.65rem; font-size: 0.76rem;">
+            <i class="fa-solid fa-list-ul"></i> Versions
+          </button>
+          <button class="mc-install-btn" data-project-id="${escapeHtml(item.project_id || item.slug)}" data-project-type="${escapeHtml(item.project_type || 'mod')}">
+            ${btnLabel}
+          </button>
+        </div>
       </div>
     `;
 
     const installBtn = card.querySelector('.mc-install-btn');
+    const versionsBtn = card.querySelector('.mc-versions-btn');
+
     installBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       installModrinthProject(item, installBtn);
+    });
+
+    versionsBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      sfx.play('click');
+      openModVersionPicker(item);
+    });
+
+    card.addEventListener('click', () => {
+      sfx.play('click');
+      openModVersionPicker(item);
     });
 
     grid.appendChild(card);
@@ -2476,39 +3551,83 @@ async function installModrinthProject(project, btn) {
 }
 
 async function loadInstalledMods() {
-  const installedList = document.getElementById('mc-installed-list');
   const countBadge = document.getElementById('mc-installed-count');
-  if (!installedList) return;
-
   const instId = mcState.activeInstance?.id;
   const mods = await window.api.mcGetInstalledMods(instId);
   mcState.installedMods = mods;
   if (countBadge) countBadge.innerText = mods.length;
 
-  if (mods.length === 0) {
-    installedList.innerHTML = `<div class="library-empty"><i class="fa-solid fa-box-open"></i><p>No mods installed in instance "${escapeHtml(mcState.activeInstance?.name || 'Default')}". Browse Modrinth above to install mods in 1-click!</p></div>`;
+  renderInstalledModsList();
+}
+
+function renderInstalledModsList() {
+  const installedList = document.getElementById('mc-installed-list');
+  if (!installedList) return;
+
+  const instId = mcState.activeInstance?.id;
+  let filtered = mcState.installedMods;
+
+  if (mcState.installedFilter === 'enabled') {
+    filtered = filtered.filter(m => m.enabled);
+  } else if (mcState.installedFilter === 'disabled') {
+    filtered = filtered.filter(m => !m.enabled);
+  }
+
+  if (mcState.installedSearch) {
+    const q = mcState.installedSearch;
+    filtered = filtered.filter(m =>
+      (m.name && m.name.toLowerCase().includes(q)) ||
+      (m.cleanName && m.cleanName.toLowerCase().includes(q)) ||
+      (m.description && m.description.toLowerCase().includes(q)) ||
+      (m.authors && m.authors.some(a => a.toLowerCase().includes(q)))
+    );
+  }
+
+  if (filtered.length === 0) {
+    installedList.innerHTML = `<div class="library-empty"><i class="fa-solid fa-box-open"></i><p>No mods found for current filter in "${escapeHtml(mcState.activeInstance?.name || 'Default')}". Drop .jar files above or browse Modrinth!</p></div>`;
     return;
   }
 
   installedList.innerHTML = '';
-  mods.forEach(mod => {
+  filtered.forEach(mod => {
     const item = document.createElement('div');
     item.className = `mc-installed-item ${mod.enabled ? '' : 'disabled'}`;
 
+    const iconHtml = mod.iconDataUri
+      ? `<img class="mc-installed-icon" src="${mod.iconDataUri}" alt="${escapeHtml(mod.name)}">`
+      : `<div class="mc-installed-icon-placeholder"><i class="fa-solid fa-cube"></i></div>`;
+
+    const authorsText = (mod.authors && mod.authors.length > 0) ? `by ${mod.authors.slice(0, 2).join(', ')}` : '';
+    const verBadge = mod.version ? `<span class="mc-installed-ver-badge">v${escapeHtml(mod.version)}</span>` : '';
+    const loaderTag = mod.loader && mod.loader !== 'unknown' ? `<span class="mc-installed-loader-tag">${escapeHtml(mod.loader)}</span>` : '';
+
+    const hasUpdate = mcState.modUpdates.find(u => u.filename === mod.filename);
+    const updateBadge = hasUpdate ? `<span class="mc-installed-ver-badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid #ef4444;"><i class="fa-solid fa-cloud-arrow-down"></i> Update v${escapeHtml(hasUpdate.currentVersion || '')}</span>` : '';
+
     item.innerHTML = `
       <div class="mc-installed-item-info">
-        <i class="fa-solid fa-file-zipper text-success"></i>
-        <div style="min-width: 0;">
-          <div class="mc-installed-item-name" title="${escapeHtml(mod.cleanName)}">${escapeHtml(mod.cleanName)}</div>
-          <div class="mc-installed-item-size">${mod.size}</div>
+        ${iconHtml}
+        <div class="mc-installed-meta">
+          <div class="mc-installed-name-row">
+            <span class="mc-installed-name" title="${escapeHtml(mod.name)}">${escapeHtml(mod.name)}</span>
+            ${verBadge}
+            ${loaderTag}
+            ${updateBadge}
+          </div>
+          ${mod.description ? `<div class="mc-installed-desc" title="${escapeHtml(mod.description)}">${escapeHtml(mod.description)}</div>` : ''}
+          <div class="mc-installed-submeta">
+            ${authorsText ? `<span>${escapeHtml(authorsText)}</span>` : ''}
+            <span>${escapeHtml(mod.size)}</span>
+            <span style="font-family: var(--font-mono);">${escapeHtml(mod.filename)}</span>
+          </div>
         </div>
       </div>
       <div class="mc-installed-item-actions">
-        <label class="switch">
+        <label class="switch" title="Toggle Mod Enabled/Disabled">
           <input type="checkbox" class="mc-mod-toggle" ${mod.enabled ? 'checked' : ''}>
           <span class="slider round"></span>
         </label>
-        <button class="icon-only-btn text-danger mc-btn-delete-mod" title="Delete mod">
+        <button class="icon-only-btn text-danger mc-btn-delete-mod" title="Delete mod file">
           <i class="fa-solid fa-trash-can"></i>
         </button>
       </div>
@@ -2524,10 +3643,10 @@ async function loadInstalledMods() {
 
     const deleteBtn = item.querySelector('.mc-btn-delete-mod');
     deleteBtn.addEventListener('click', async () => {
-      if (confirm(`Are you sure you want to delete ${mod.cleanName}?`)) {
+      if (confirm(`Are you sure you want to delete ${mod.name || mod.cleanName}?`)) {
         sfx.play('click');
         await window.api.mcDeleteMod(mod.filename, instId);
-        showToast('Mod Removed', `${mod.cleanName} deleted.`, 'info', 2000);
+        showToast('Mod Removed', `${mod.name || mod.cleanName} deleted.`, 'info', 2000);
         loadInstalledMods();
       }
     });
@@ -2544,7 +3663,6 @@ async function launchMinecraft() {
   const statusText = document.getElementById('mc-launch-status-text');
   const percentEl = document.getElementById('mc-launch-percent');
   const barFill = document.getElementById('mc-launch-bar-fill');
-  const consoleOutput = document.getElementById('mc-console-output');
 
   mcState.isLaunching = true;
   sfx.play('launch');
@@ -2564,10 +3682,8 @@ async function launchMinecraft() {
     if (percentEl) percentEl.innerText = '5%';
     if (statusText) statusText.innerHTML = '<i class="fa-solid fa-arrows-rotate spin-icon"></i> Resolving Version & Java Runtime...';
   }
-  if (consoleOutput) {
-    consoleOutput.innerText = `[ANTIGRAVITY] Launching instance "${active?.name || 'Default'}" - Minecraft ${version} (${loader})...\n`;
-  }
 
+  appendGameLog(`[ANTIGRAVITY] Launching instance "${active?.name || 'Default'}" - Minecraft ${version} (${loader})...`);
   showToast('Launching Minecraft', `Starting "${active?.name || 'Default'}" with ${ramMax} GB RAM...`, 'info', 3000);
 
   const res = await window.api.mcLaunchGame({
@@ -2585,6 +3701,7 @@ async function launchMinecraft() {
       btnLaunch.innerHTML = '<i class="fa-solid fa-play"></i> <span>PLAY MINECRAFT</span>';
     }
     if (progressBox) progressBox.style.display = 'none';
+    appendGameLog(`[ANTIGRAVITY] Launch Error: ${res.error || 'Unknown error'}`);
     showToast('Launch Failed', res.error || 'Could not launch Minecraft.', 'error', 5000);
   }
 }

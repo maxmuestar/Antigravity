@@ -1174,12 +1174,13 @@ async function enableAdblocking(sessionInstance) {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: 1366,
+    height: 850,
     minWidth: 1000,
     minHeight: 700,
-    title: 'Game Launcher & Downloader',
+    title: 'AntiGravity Game Launcher',
     autoHideMenuBar: true,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -1189,6 +1190,8 @@ function createWindow() {
     }
   });
 
+  mainWindow.maximize();
+  mainWindow.show();
   mainWindow.setMenuBarVisibility(false);
   mainWindow.setMenu(null);
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
@@ -1715,7 +1718,7 @@ ipcMain.handle('open-windows-security', async () => {
 });
 
 ipcMain.handle('set-window-fullscreen', (event, fullscreen) => {
-  const targetWindow = BrowserWindow.fromWebContents(event.sender);
+  const targetWindow = BrowserWindow.fromWebContents(event.sender) || mainWindow;
   if (!targetWindow) return { success: false, error: 'Window not found' };
 
   targetWindow.setFullScreen(Boolean(fullscreen));
@@ -1723,7 +1726,7 @@ ipcMain.handle('set-window-fullscreen', (event, fullscreen) => {
 });
 
 ipcMain.handle('is-window-fullscreen', (event) => {
-  const targetWindow = BrowserWindow.fromWebContents(event.sender);
+  const targetWindow = BrowserWindow.fromWebContents(event.sender) || mainWindow;
   return Boolean(targetWindow && targetWindow.isFullScreen());
 });
 
@@ -2312,9 +2315,81 @@ ipcMain.handle('mc-toggle-mod', (event, { filename, enable, instanceId }) => {
   return minecraftService.toggleMod(filename, enable, instanceId);
 });
 
+ipcMain.handle('mc-toggle-all-mods', (event, { enable, instanceId }) => {
+  if (!minecraftService) return { success: false };
+  return minecraftService.toggleAllMods(enable, instanceId);
+});
+
 ipcMain.handle('mc-delete-mod', (event, { filename, instanceId }) => {
   if (!minecraftService) return { success: false };
   return minecraftService.deleteMod(filename, instanceId);
+});
+
+ipcMain.handle('mc-install-local-jars', (event, { filePaths, instanceId }) => {
+  if (!minecraftService) return { success: false };
+  return minecraftService.installLocalJars(filePaths, instanceId);
+});
+
+ipcMain.handle('mc-check-mod-updates', async (event, instanceId) => {
+  if (!minecraftService) return { success: false, updates: [] };
+  return await minecraftService.checkModUpdates(instanceId);
+});
+
+ipcMain.handle('mc-upload-log', async (event, logText) => {
+  if (!minecraftService) return { success: false, error: 'Service not initialized' };
+  return await minecraftService.uploadLogToMclogs(logText);
+});
+
+ipcMain.handle('mc-get-project', async (event, projectId) => {
+  if (!minecraftService) return null;
+  return await minecraftService.getModrinthProject(projectId);
+});
+
+ipcMain.handle('mc-set-offline-skin', (event, skinConfig) => {
+  if (!minecraftService) return { success: false, error: 'Service not initialized' };
+  return minecraftService.setOfflineProfileWithSkin(skinConfig);
+});
+
+ipcMain.handle('mc-get-accounts', () => {
+  if (!minecraftService) return { activeAccountId: null, accounts: [] };
+  return minecraftService.getAccountsData();
+});
+
+ipcMain.handle('mc-set-active-account', (event, accountId) => {
+  if (!minecraftService) return { success: false, error: 'Service not initialized' };
+  return minecraftService.setActiveAccount(accountId);
+});
+
+ipcMain.handle('mc-delete-account', (event, accountId) => {
+  if (!minecraftService) return { success: false, error: 'Service not initialized' };
+  return minecraftService.removeAccount(accountId);
+});
+
+ipcMain.handle('mc-browse-file', async (event, { type }) => {
+  const filters = type === 'skin'
+    ? [{ name: 'Minecraft Skin (.png)', extensions: ['png'] }]
+    : [{ name: 'Java Executable (javaw.exe, java.exe)', extensions: ['exe'] }, { name: 'All Files', extensions: ['*'] }];
+
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: type === 'skin' ? 'Select Minecraft Skin (.png)' : 'Select Java Runtime Executable',
+    properties: ['openFile'],
+    filters
+  });
+
+  if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+    return null;
+  }
+
+  const filePath = result.filePaths[0];
+  if (type === 'skin') {
+    const buf = fs.readFileSync(filePath);
+    return {
+      filePath,
+      dataUri: `data:image/png;base64,${buf.toString('base64')}`
+    };
+  }
+
+  return { filePath };
 });
 
 ipcMain.handle('mc-open-folder', (event, { folderType, instanceId }) => {
@@ -2345,3 +2420,4 @@ ipcMain.handle('mc-launch-game', async (event, launchConfig) => {
     }
   );
 });
+

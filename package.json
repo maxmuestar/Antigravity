@@ -1,7 +1,7 @@
 {
   "name": "antigravity-launcher",
-  "version": "7.0.0",
-  "description": "A Windows game downloader and launcher with an in-app browser and zip extraction.",
+  "version": "7.5.0",
+  "description": "Premium All-in-One Game Launcher",
   "repository": {
     "type": "git",
     "url": "https://github.com/maxmuestar/Antigravity.git"

@@ -6,23 +6,151 @@ const crypto = require('crypto');
 const { URL, URLSearchParams } = require('url');
 const AdmZip = require('adm-zip');
 
+class LocalSkinServer {
+  constructor() {
+    this.port = 28543;
+    this.server = null;
+    this.currentSkinBuffer = null;
+    this.currentProfile = null;
+  }
+
+  setSkin(profile, skinBuffer) {
+    this.currentProfile = profile;
+    this.currentSkinBuffer = skinBuffer;
+  }
+
+  start() {
+    if (this.server) return Promise.resolve(this.port);
+
+    return new Promise((resolve, reject) => {
+      this.server = http.createServer((req, res) => {
+        const url = req.url.split('?')[0];
+
+        if (url === '/' || url === '/api') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({
+            meta: {
+              serverName: "AntiGravity Offline Skin Station",
+              implementationName: "antigravity-skin-station",
+              version: "7.5.0"
+            },
+            skinDomains: ["127.0.0.1", "localhost", "minotar.net", "mc-heads.net"]
+          }));
+        }
+
+        if (url.startsWith('/sessionserver/session/minecraft/profile/')) {
+          const rawUuid = url.split('/').pop();
+          const cleanUuid = rawUuid.replace(/-/g, '');
+          const gamertag = this.currentProfile?.gamertag || 'Player';
+          const model = this.currentProfile?.skinModel === 'slim' ? 'slim' : 'default';
+
+          const skinUrl = `http://127.0.0.1:${this.port}/textures/${cleanUuid}.png`;
+          const texturePayload = {
+            timestamp: Date.now(),
+            profileId: cleanUuid,
+            profileName: gamertag,
+            textures: {
+              SKIN: {
+                url: skinUrl,
+                metadata: {
+                  model: model
+                }
+              }
+            }
+          };
+
+          const base64 = Buffer.from(JSON.stringify(texturePayload)).toString('base64');
+
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({
+            id: cleanUuid,
+            name: gamertag,
+            properties: [
+              {
+                name: "textures",
+                value: base64
+              }
+            ]
+          }));
+        }
+
+        if (url.startsWith('/textures/')) {
+          if (this.currentSkinBuffer) {
+            res.writeHead(200, {
+              'Content-Type': 'image/png',
+              'Content-Length': this.currentSkinBuffer.length
+            });
+            return res.end(this.currentSkinBuffer);
+          }
+        }
+
+        res.writeHead(404);
+        res.end();
+      });
+
+      this.server.listen(this.port, '127.0.0.1', () => {
+        console.log(`[MC SKIN SERVER] Local Yggdrasil mock running on http://127.0.0.1:${this.port}`);
+        resolve(this.port);
+      });
+
+      this.server.on('error', (err) => {
+        if (err.code === 'EADDRINUSE') {
+          this.port++;
+          this.server.listen(this.port, '127.0.0.1');
+        } else {
+          console.warn('[MC SKIN SERVER] Server error:', err.message);
+          resolve(this.port);
+        }
+      });
+    });
+  }
+
+  stop() {
+    if (this.server) {
+      this.server.close();
+      this.server = null;
+    }
+  }
+}
+
 class MinecraftService {
   constructor(userDataDir) {
     this.userDataDir = userDataDir;
     this.mcDir = path.join(userDataDir, 'minecraft');
     this.instancesDir = path.join(this.mcDir, 'instances');
     this.forgeDir = path.join(this.mcDir, 'forge-installers');
+    this.runtimeDir = path.join(this.mcDir, 'runtime');
+    this.skinsDir = path.join(this.mcDir, 'skins');
     this.profilePath = path.join(this.mcDir, 'profile.json');
+    this.accountsPath = path.join(this.mcDir, 'accounts.json');
     this.instancesConfigPath = path.join(this.mcDir, 'instances.json');
+    this.modMetaCachePath = path.join(this.mcDir, 'mod_metadata_cache.json');
 
+    this.skinServer = new LocalSkinServer();
+    this.modMetaCache = this.loadModMetaCache();
     this.ensureDirs();
     this.initDefaultInstance();
   }
 
   ensureDirs() {
-    [this.mcDir, this.instancesDir, this.forgeDir].forEach(dir => {
+    [this.mcDir, this.instancesDir, this.forgeDir, this.runtimeDir, this.skinsDir].forEach(dir => {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     });
+  }
+
+  loadModMetaCache() {
+    try {
+      if (fs.existsSync(this.modMetaCachePath)) {
+        return JSON.parse(fs.readFileSync(this.modMetaCachePath, 'utf-8'));
+      }
+    } catch (e) {}
+    return {};
+  }
+
+  saveModMetaCache() {
+    try {
+      fs.writeFileSync(this.modMetaCachePath, JSON.stringify(this.modMetaCache), 'utf-8');
+    } catch (e) {}
   }
 
   initDefaultInstance() {
@@ -45,6 +173,12 @@ class MinecraftService {
             ramMin: 2,
             ramMax: 4,
             icon: 'cube',
+            jvmArgs: '-XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1NewSizePercent=20 -XX:G1ReservePercent=20 -XX:MaxGCPauseMillis=50 -XX:G1HeapRegionSize=32M',
+            customJavaPath: '',
+            windowWidth: 1280,
+            windowHeight: 720,
+            fullscreen: false,
+            serverAddress: '',
             created: new Date().toISOString()
           }
         ]
@@ -88,7 +222,13 @@ class MinecraftService {
       loader: 'fabric',
       ramMin: 2,
       ramMax: 4,
-      icon: 'cube'
+      icon: 'cube',
+      jvmArgs: '',
+      customJavaPath: '',
+      windowWidth: 1280,
+      windowHeight: 720,
+      fullscreen: false,
+      serverAddress: ''
     };
   }
 
@@ -103,7 +243,20 @@ class MinecraftService {
     return { success: false, error: 'Instance not found' };
   }
 
-  createInstance({ name, version = '1.20.1', loader = 'fabric', ramMin = 2, ramMax = 4, icon = 'cube' }) {
+  createInstance({
+    name,
+    version = '1.20.1',
+    loader = 'fabric',
+    ramMin = 2,
+    ramMax = 4,
+    icon = 'cube',
+    jvmArgs = '',
+    customJavaPath = '',
+    windowWidth = 1280,
+    windowHeight = 720,
+    fullscreen = false,
+    serverAddress = ''
+  }) {
     const data = this.getInstancesData();
     const slug = (name || 'instance').toLowerCase().replace(/[^a-z0-9_-]/g, '-');
     let id = `${slug}-${Date.now().toString(36)}`;
@@ -122,6 +275,12 @@ class MinecraftService {
       ramMin: parseInt(ramMin, 10) || 2,
       ramMax: parseInt(ramMax, 10) || 4,
       icon: icon || 'cube',
+      jvmArgs: jvmArgs || '',
+      customJavaPath: customJavaPath || '',
+      windowWidth: parseInt(windowWidth, 10) || 1280,
+      windowHeight: parseInt(windowHeight, 10) || 720,
+      fullscreen: Boolean(fullscreen),
+      serverAddress: serverAddress || '',
       created: new Date().toISOString()
     };
 
@@ -184,7 +343,7 @@ class MinecraftService {
 
       const headers = {
         'Accept': 'application/json',
-        'User-Agent': 'AntiGravity-Launcher/7.0.0',
+        'User-Agent': 'AntiGravity-Launcher/7.5.0',
         ...(options.headers || {})
       };
 
@@ -218,7 +377,7 @@ class MinecraftService {
 
   fetchJson(url) {
     return new Promise((resolve, reject) => {
-      https.get(url, { headers: { 'User-Agent': 'AntiGravity-Launcher/7.0.0' } }, (res) => {
+      https.get(url, { headers: { 'User-Agent': 'AntiGravity-Launcher/7.5.0' } }, (res) => {
         let data = '';
         res.on('data', chunk => data += chunk);
         res.on('end', () => {
@@ -232,27 +391,190 @@ class MinecraftService {
     });
   }
 
-  getProfile() {
+  getAccountsData() {
+    if (fs.existsSync(this.accountsPath)) {
+      try {
+        const data = JSON.parse(fs.readFileSync(this.accountsPath, 'utf8'));
+        if (data && Array.isArray(data.accounts) && data.accounts.length > 0) {
+          return data;
+        }
+      } catch (e) {}
+    }
+
+    // Migrate from legacy profile.json if present
+    let initialAccounts = [];
+    let initialActiveId = null;
+
+    if (fs.existsSync(this.profilePath)) {
+      try {
+        const legacyProf = JSON.parse(fs.readFileSync(this.profilePath, 'utf8'));
+        if (legacyProf && legacyProf.gamertag) {
+          const accId = legacyProf.isOffline ? `offline-${legacyProf.uuid || legacyProf.gamertag}` : `ms-${legacyProf.uuid || legacyProf.gamertag}`;
+          const migrated = {
+            id: accId,
+            type: legacyProf.isOffline ? 'offline' : 'microsoft',
+            gamertag: legacyProf.gamertag,
+            uuid: legacyProf.uuid || this.generateOfflineUuid(legacyProf.gamertag),
+            skinUrl: legacyProf.skinUrl,
+            bodyUrl: legacyProf.bodyUrl,
+            rawSkinUrl: legacyProf.rawSkinUrl,
+            skinSource: legacyProf.skinSource || 'username',
+            skinValue: legacyProf.skinValue || legacyProf.gamertag,
+            skinModel: legacyProf.skinModel || 'classic',
+            token: legacyProf.token,
+            isOffline: Boolean(legacyProf.isOffline),
+            lastUsed: new Date().toISOString()
+          };
+          initialAccounts.push(migrated);
+          initialActiveId = accId;
+        }
+      } catch (e) {}
+    }
+
+    if (initialAccounts.length === 0) {
+      const defaultAcc = {
+        id: 'offline-Player',
+        type: 'offline',
+        gamertag: 'Player',
+        uuid: 'ec19ab1a-9b54-3aea-9df0-2bad2896c38d',
+        skinUrl: 'https://mc-heads.net/avatar/Steve/128',
+        bodyUrl: 'https://mc-heads.net/body/Steve/256',
+        skinSource: 'preset',
+        skinValue: 'Steve',
+        skinModel: 'classic',
+        isOffline: true,
+        token: {
+          access_token: 'ec19ab1a-9b54-3aea-9df0-2bad2896c38d',
+          client_token: 'ec19ab1a-9b54-3aea-9df0-2bad2896c38d',
+          uuid: 'ec19ab1a-9b54-3aea-9df0-2bad2896c38d',
+          name: 'Player',
+          user_properties: '{}'
+        },
+        lastUsed: new Date().toISOString()
+      };
+      initialAccounts.push(defaultAcc);
+      initialActiveId = defaultAcc.id;
+    }
+
+    const data = {
+      activeAccountId: initialActiveId,
+      accounts: initialAccounts
+    };
+
+    this.saveAccountsData(data);
+    return data;
+  }
+
+  saveAccountsData(data) {
     try {
-      if (fs.existsSync(this.profilePath)) {
-        return JSON.parse(fs.readFileSync(this.profilePath, 'utf-8'));
+      fs.writeFileSync(this.accountsPath, JSON.stringify(data, null, 2), 'utf8');
+      const active = data.accounts.find(a => a.id === data.activeAccountId) || data.accounts[0];
+      if (active) {
+        fs.writeFileSync(this.profilePath, JSON.stringify(active, null, 2), 'utf8');
       }
     } catch (e) {
-      console.warn('Failed to read MC profile:', e);
+      console.error('Error saving accounts:', e);
     }
-    return null;
+  }
+
+  getActiveAccount() {
+    const data = this.getAccountsData();
+    let active = data.accounts.find(a => a.id === data.activeAccountId);
+    if (!active && data.accounts.length > 0) {
+      active = data.accounts[0];
+      data.activeAccountId = active.id;
+      this.saveAccountsData(data);
+    }
+    return active;
+  }
+
+  async setActiveAccount(accountId) {
+    const data = this.getAccountsData();
+    const target = data.accounts.find(a => a.id === accountId);
+    if (!target) return { success: false, error: 'Account not found' };
+
+    data.activeAccountId = accountId;
+    target.lastUsed = new Date().toISOString();
+    this.saveAccountsData(data);
+
+    // If offline, also inject skinpack for active instance
+    if (target.isOffline) {
+      const activeInst = this.getActiveInstance();
+      if (activeInst) {
+        const instDir = this.getInstanceDir(activeInst.id);
+        await this.injectOfflineSkinPack(instDir, target);
+      }
+    }
+
+    return { success: true, activeAccount: target, accounts: data.accounts };
+  }
+
+  addOrUpdateAccount(account) {
+    const data = this.getAccountsData();
+    const idx = data.accounts.findIndex(a => a.id === account.id || (a.type === account.type && a.gamertag.toLowerCase() === account.gamertag.toLowerCase()));
+
+    if (idx >= 0) {
+      data.accounts[idx] = { ...data.accounts[idx], ...account, lastUsed: new Date().toISOString() };
+      data.activeAccountId = data.accounts[idx].id;
+    } else {
+      account.lastUsed = new Date().toISOString();
+      data.accounts.push(account);
+      data.activeAccountId = account.id;
+    }
+
+    this.saveAccountsData(data);
+    return { success: true, activeAccount: this.getActiveAccount(), accounts: data.accounts };
+  }
+
+  removeAccount(accountId) {
+    const data = this.getAccountsData();
+    data.accounts = data.accounts.filter(a => a.id !== accountId);
+
+    if (data.accounts.length === 0) {
+      const defaultAcc = {
+        id: 'offline-Player',
+        type: 'offline',
+        gamertag: 'Player',
+        uuid: 'ec19ab1a-9b54-3aea-9df0-2bad2896c38d',
+        skinUrl: 'https://mc-heads.net/avatar/Steve/128',
+        bodyUrl: 'https://mc-heads.net/body/Steve/256',
+        skinSource: 'preset',
+        skinValue: 'Steve',
+        skinModel: 'classic',
+        isOffline: true,
+        token: {
+          access_token: 'ec19ab1a-9b54-3aea-9df0-2bad2896c38d',
+          client_token: 'ec19ab1a-9b54-3aea-9df0-2bad2896c38d',
+          uuid: 'ec19ab1a-9b54-3aea-9df0-2bad2896c38d',
+          name: 'Player',
+          user_properties: '{}'
+        },
+        lastUsed: new Date().toISOString()
+      };
+      data.accounts.push(defaultAcc);
+      data.activeAccountId = defaultAcc.id;
+    } else if (data.activeAccountId === accountId) {
+      data.activeAccountId = data.accounts[0].id;
+    }
+
+    this.saveAccountsData(data);
+    return { success: true, activeAccount: this.getActiveAccount(), accounts: data.accounts };
+  }
+
+  getProfile() {
+    return this.getActiveAccount();
   }
 
   saveProfile(profile) {
-    fs.writeFileSync(this.profilePath, JSON.stringify(profile, null, 2), 'utf-8');
-    return profile;
+    return this.addOrUpdateAccount(profile);
   }
 
   logout() {
-    if (fs.existsSync(this.profilePath)) {
-      try { fs.unlinkSync(this.profilePath); } catch (e) {}
+    const active = this.getActiveAccount();
+    if (active) {
+      this.removeAccount(active.id);
     }
-    return { success: true };
+    return { success: true, activeAccount: this.getActiveAccount() };
   }
 
   async exchangeMicrosoftAuth(code) {
@@ -343,12 +665,12 @@ class MinecraftService {
 
     let playerName = gamertagFromXbl || 'Player';
     let playerUuid = '00000000-0000-0000-0000-000000000000';
-    let skinUrl = `https://crafatar.com/avatars/${playerName}?overlay`;
+    let skinUrl = `https://mc-heads.net/avatar/${playerName}/128`;
 
     if (profileRes.status === 200 && profileRes.data?.name) {
       playerName = profileRes.data.name;
       playerUuid = profileRes.data.id;
-      skinUrl = `https://crafatar.com/avatars/${playerUuid}?overlay`;
+      skinUrl = `https://mc-heads.net/avatar/${playerUuid}/128`;
       console.log(`[MC AUTH] Found Minecraft Java Profile: ${playerName} (${playerUuid})`);
     } else {
       console.log(`[MC AUTH] Using Xbox Gamertag: ${playerName}`);
@@ -369,15 +691,19 @@ class MinecraftService {
     };
 
     const profile = {
+      id: `ms-${playerUuid}`,
+      type: 'microsoft',
       gamertag: playerName,
       uuid: playerUuid,
       skinUrl: skinUrl,
+      bodyUrl: `https://mc-heads.net/body/${playerUuid}/256`,
+      skinModel: 'classic',
       token: mclcAuth,
       isOffline: false,
       lastLogin: new Date().toISOString()
     };
 
-    this.saveProfile(profile);
+    this.addOrUpdateAccount(profile);
     return profile;
   }
 
@@ -452,24 +778,194 @@ class MinecraftService {
     });
   }
 
+  generateOfflineUuid(username) {
+    const clean = (username || 'Player').trim() || 'Player';
+    const md5 = crypto.createHash('md5').update('OfflinePlayer:' + clean).digest();
+    md5[6] = (md5[6] & 0x0f) | 0x30;
+    md5[8] = (md5[8] & 0x3f) | 0x80;
+    const hex = md5.toString('hex');
+    return `${hex.substr(0, 8)}-${hex.substr(8, 4)}-${hex.substr(12, 4)}-${hex.substr(16, 4)}-${hex.substr(20, 12)}`;
+  }
+
+  async injectOfflineSkinPack(instanceDir, profile) {
+    if (!instanceDir || !profile) return;
+    try {
+      const skinFile = profile.rawSkinUrl && fs.existsSync(profile.rawSkinUrl)
+        ? profile.rawSkinUrl
+        : path.join(this.skinsDir, `skin_${profile.gamertag}.png`);
+
+      let skinBuffer = null;
+      if (fs.existsSync(skinFile)) {
+        skinBuffer = fs.readFileSync(skinFile);
+      } else if (profile.skinDataUri && profile.skinDataUri.startsWith('data:image/png;base64,')) {
+        skinBuffer = Buffer.from(profile.skinDataUri.replace(/^data:image\/png;base64,/, ''), 'base64');
+      } else if (profile.skinValue || profile.gamertag) {
+        try {
+          const dlPath = path.join(this.skinsDir, `skin_${profile.gamertag}.png`);
+          await this.downloadFileWithRedirects(`https://minotar.net/skin/${encodeURIComponent(profile.skinValue || profile.gamertag)}`, dlPath);
+          if (fs.existsSync(dlPath)) skinBuffer = fs.readFileSync(dlPath);
+        } catch (e) {}
+      }
+
+      if (!skinBuffer) return;
+
+      // 1. CustomSkinLoader directories for modded instances
+      const cslDir = path.join(instanceDir, 'CustomSkinLoader', 'skins');
+      if (!fs.existsSync(cslDir)) fs.mkdirSync(cslDir, { recursive: true });
+      fs.writeFileSync(path.join(cslDir, `${profile.gamertag}.png`), skinBuffer);
+      if (profile.uuid) fs.writeFileSync(path.join(cslDir, `${profile.uuid}.png`), skinBuffer);
+
+      // 2. Local skins folder
+      const skinsSubDir = path.join(instanceDir, 'skins');
+      if (!fs.existsSync(skinsSubDir)) fs.mkdirSync(skinsSubDir, { recursive: true });
+      fs.writeFileSync(path.join(skinsSubDir, `${profile.gamertag}.png`), skinBuffer);
+
+      // 3. Universal Resourcepack for Vanilla & Modded instances
+      const packDir = path.join(instanceDir, 'resourcepacks');
+      if (!fs.existsSync(packDir)) fs.mkdirSync(packDir, { recursive: true });
+
+      const packZipPath = path.join(packDir, 'AntiGravity_SkinPack.zip');
+      const zip = new AdmZip();
+      const mcmeta = {
+        pack: {
+          pack_format: 15,
+          description: `AntiGravity Skin Pack - ${profile.gamertag}`
+        }
+      };
+      zip.addFile('pack.mcmeta', Buffer.from(JSON.stringify(mcmeta, null, 2), 'utf8'));
+
+      // Include all textures for wide and slim across all MC releases
+      zip.addFile('assets/minecraft/textures/entity/player/wide/steve.png', skinBuffer);
+      zip.addFile('assets/minecraft/textures/entity/player/slim/alex.png', skinBuffer);
+      zip.addFile('assets/minecraft/textures/entity/player/wide/alex.png', skinBuffer);
+      zip.addFile('assets/minecraft/textures/entity/player/slim/steve.png', skinBuffer);
+      zip.addFile('assets/minecraft/textures/entity/steve.png', skinBuffer);
+      zip.addFile('assets/minecraft/textures/entity/alex.png', skinBuffer);
+      zip.writeZip(packZipPath);
+
+      // 4. Force enable in options.txt
+      const optionsPath = path.join(instanceDir, 'options.txt');
+      let optionsContent = '';
+      if (fs.existsSync(optionsPath)) {
+        optionsContent = fs.readFileSync(optionsPath, 'utf8');
+      }
+
+      const packEntry = '"file/AntiGravity_SkinPack.zip"';
+      if (optionsContent.includes('resourcePacks:[')) {
+        if (!optionsContent.includes(packEntry)) {
+          optionsContent = optionsContent.replace('resourcePacks:[', `resourcePacks:[${packEntry},`);
+        }
+      } else {
+        optionsContent += `\nresourcePacks:[${packEntry},"vanilla"]\n`;
+      }
+      fs.writeFileSync(optionsPath, optionsContent, 'utf8');
+      console.log(`[MC SKIN] Successfully injected offline skin for ${profile.gamertag} into: ${instanceDir}`);
+    } catch (e) {
+      console.warn('[MC SKIN] Could not inject skinpack:', e.message);
+    }
+  }
+
   setOfflineProfile(username = 'Player') {
-    const { Authenticator } = require('minecraft-launcher-core');
-    const auth = Authenticator.getAuth(username || 'Player');
+    const cleanName = (username || 'Player').trim() || 'Player';
+    const uuid = this.generateOfflineUuid(cleanName);
+    const token = {
+      access_token: uuid,
+      client_token: uuid,
+      uuid: uuid,
+      name: cleanName,
+      user_properties: '{}'
+    };
+
     const profile = {
-      gamertag: username || 'Player',
-      uuid: auth.uuid,
-      skinUrl: `https://crafatar.com/avatars/${auth.uuid}?overlay`,
-      token: auth,
+      gamertag: cleanName,
+      uuid: uuid,
+      skinUrl: `https://mc-heads.net/avatar/${encodeURIComponent(cleanName)}/128`,
+      bodyUrl: `https://mc-heads.net/body/${encodeURIComponent(cleanName)}/256`,
+      rawSkinUrl: `https://minotar.net/skin/${encodeURIComponent(cleanName)}`,
+      skinSource: 'username',
+      skinValue: cleanName,
+      skinModel: 'classic',
+      token: token,
       isOffline: true,
       lastLogin: new Date().toISOString()
     };
+
     this.saveProfile(profile);
     return { success: true, profile };
+  }
+
+  async setOfflineProfileWithSkin({ username = 'Player', skinSource = 'username', skinValue = '', skinModel = 'classic', skinDataUri = null }) {
+    const cleanName = (username || 'Player').trim() || 'Player';
+    const uuid = this.generateOfflineUuid(cleanName);
+    const token = {
+      access_token: uuid,
+      client_token: uuid,
+      uuid: uuid,
+      name: cleanName,
+      user_properties: '{}'
+    };
+
+    let skinUrl = `https://mc-heads.net/avatar/${encodeURIComponent(cleanName)}/128`;
+    let bodyUrl = `https://mc-heads.net/body/${encodeURIComponent(cleanName)}/256`;
+    let rawSkinUrl = `https://minotar.net/skin/${encodeURIComponent(cleanName)}`;
+    const localSavedSkinPath = path.join(this.skinsDir, `skin_${cleanName}.png`);
+
+    if (skinSource === 'preset') {
+      const presetName = skinValue || 'Steve';
+      skinUrl = `https://mc-heads.net/avatar/${encodeURIComponent(presetName)}/128`;
+      bodyUrl = `https://mc-heads.net/body/${encodeURIComponent(presetName)}/256`;
+      rawSkinUrl = `https://minotar.net/skin/${encodeURIComponent(presetName)}`;
+      try {
+        await this.downloadFileWithRedirects(rawSkinUrl, localSavedSkinPath);
+      } catch (e) {}
+    } else if (skinSource === 'username' && skinValue) {
+      skinUrl = `https://mc-heads.net/avatar/${encodeURIComponent(skinValue)}/128`;
+      bodyUrl = `https://mc-heads.net/body/${encodeURIComponent(skinValue)}/256`;
+      rawSkinUrl = `https://minotar.net/skin/${encodeURIComponent(skinValue)}`;
+      try {
+        await this.downloadFileWithRedirects(rawSkinUrl, localSavedSkinPath);
+      } catch (e) {}
+    } else if (skinSource === 'custom' && skinDataUri) {
+      const base64Data = skinDataUri.replace(/^data:image\/png;base64,/, '');
+      fs.writeFileSync(localSavedSkinPath, Buffer.from(base64Data, 'base64'));
+      skinUrl = skinDataUri;
+      bodyUrl = skinDataUri;
+      rawSkinUrl = localSavedSkinPath;
+    }
+
+    const profile = {
+      id: `offline-${uuid}`,
+      type: 'offline',
+      gamertag: cleanName,
+      uuid: uuid,
+      skinUrl,
+      bodyUrl,
+      rawSkinUrl: localSavedSkinPath,
+      skinSource: skinSource || 'username',
+      skinValue: skinValue || cleanName,
+      skinModel: skinModel || 'classic',
+      token,
+      isOffline: true,
+      lastLogin: new Date().toISOString()
+    };
+
+    this.addOrUpdateAccount(profile);
+
+    const activeInst = this.getActiveInstance();
+    if (activeInst) {
+      const instDir = this.getInstanceDir(activeInst.id);
+      await this.injectOfflineSkinPack(instDir, profile);
+    }
+
+    return { success: true, profile, accounts: this.getAccountsData().accounts };
   }
 
   findInstalledJavaRuntimes() {
     const runtimes = [];
     const searchDirs = [
+      path.join(this.runtimeDir, 'java-21'),
+      path.join(this.runtimeDir, 'java-17'),
+      path.join(this.runtimeDir, 'java-8'),
       'C:\\Program Files\\Java',
       'C:\\Program Files\\Eclipse Adoptium',
       'C:\\Program Files\\Microsoft',
@@ -482,16 +978,19 @@ class MinecraftService {
     searchDirs.forEach(baseDir => {
       if (fs.existsSync(baseDir)) {
         try {
+          const checkExe = (targetDir, name) => {
+            const javaw = path.join(targetDir, 'bin', 'javaw.exe');
+            const java = path.join(targetDir, 'bin', 'java.exe');
+            if (fs.existsSync(javaw)) runtimes.push({ name, path: javaw });
+            else if (fs.existsSync(java)) runtimes.push({ name, path: java });
+          };
+
+          checkExe(baseDir, path.basename(baseDir));
+
           const subdirs = fs.readdirSync(baseDir);
           subdirs.forEach(sub => {
             const fullPath = path.join(baseDir, sub);
-            const javawExe = path.join(fullPath, 'bin', 'javaw.exe');
-            const javaExe = path.join(fullPath, 'bin', 'java.exe');
-            [javawExe, javaExe].forEach(exe => {
-              if (fs.existsSync(exe)) {
-                runtimes.push({ name: sub, path: exe });
-              }
-            });
+            checkExe(fullPath, sub);
           });
         } catch (e) {}
       }
@@ -500,28 +999,146 @@ class MinecraftService {
     return runtimes;
   }
 
-  resolveJavaPath(mcVersion) {
-    const runtimes = this.findInstalledJavaRuntimes();
-    if (runtimes.length === 0) return null;
+  async ensureJavaRuntime(targetMajor = 17, onProgress) {
+    const targetDir = path.join(this.runtimeDir, `java-${targetMajor}`);
+    const targetJavaw = path.join(targetDir, 'bin', 'javaw.exe');
 
-    const vParts = (mcVersion || '1.20.1').split('.').map(p => parseInt(p, 10));
-    const minor = vParts[1] || 20;
-    const patch = vParts[2] || 0;
-
-    let targetMajor = '17';
-    if (minor >= 21 || (minor === 20 && patch >= 5)) {
-      targetMajor = '21';
-    } else if (minor === 17) {
-      targetMajor = '16';
-    } else if (minor <= 16) {
-      targetMajor = '8';
+    if (fs.existsSync(targetJavaw)) {
+      return targetJavaw;
     }
 
-    const exactMatch = runtimes.find(r => r.name.includes(targetMajor) || r.path.includes(targetMajor));
-    if (exactMatch) return exactMatch.path;
+    console.log(`[MC JAVA] Downloading isolated Java ${targetMajor} JRE from Adoptium...`);
+    const tempZip = path.join(this.runtimeDir, `jre_${targetMajor}_temp.zip`);
 
-    const javaw = runtimes.find(r => r.path.endsWith('javaw.exe'));
-    return javaw ? javaw.path : runtimes[0].path;
+    try {
+      const adoptiumApiUrl = `https://api.adoptium.net/v3/binary/latest/${targetMajor}/ga/windows/x64/jre/hotspot/normal/eclipse`;
+
+      if (onProgress) onProgress({ type: 'java', task: `Downloading Java ${targetMajor} portable runtime...`, percent: 20 });
+      await this.downloadFileWithRedirects(adoptiumApiUrl, tempZip, (p) => {
+        if (onProgress) onProgress({
+          type: 'java',
+          task: `Downloading Java ${targetMajor} runtime (${p.received} / ${p.total} MB)...`,
+          percent: p.percent
+        });
+      });
+
+      if (onProgress) onProgress({ type: 'java', task: `Extracting Java ${targetMajor} runtime...`, percent: 85 });
+      const zip = new AdmZip(tempZip);
+      const tempExtractDir = path.join(this.runtimeDir, `extract_${Date.now()}`);
+      zip.extractAllTo(tempExtractDir, true);
+
+      // Locate the root folder containing bin/javaw.exe
+      const extractedFolders = fs.readdirSync(tempExtractDir);
+      let sourceDir = tempExtractDir;
+      if (extractedFolders.length === 1 && fs.statSync(path.join(tempExtractDir, extractedFolders[0])).isDirectory()) {
+        sourceDir = path.join(tempExtractDir, extractedFolders[0]);
+      }
+
+      if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true, force: true });
+      fs.renameSync(sourceDir, targetDir);
+
+      try {
+        fs.rmSync(tempExtractDir, { recursive: true, force: true });
+        fs.unlinkSync(tempZip);
+      } catch (e) {}
+
+      console.log(`[MC JAVA] Successfully installed Java ${targetMajor} to: ${targetJavaw}`);
+      return targetJavaw;
+    } catch (err) {
+      try { if (fs.existsSync(tempZip)) fs.unlinkSync(tempZip); } catch (e) {}
+      console.error(`[MC JAVA] Failed to auto-download Java ${targetMajor}:`, err);
+      return null;
+    }
+  }
+
+  determineJavaMajor(mcVersion) {
+    if (!mcVersion) return 17;
+    const clean = String(mcVersion).replace(/[^0-9.]/g, '');
+    const parts = clean.split('.').map(p => parseInt(p, 10)).filter(n => !isNaN(n));
+    if (parts.length === 0) return 17;
+
+    const major = parts[0];
+    const minor = parts.length > 1 ? parts[1] : 0;
+    const patch = parts.length > 2 ? parts[2] : 0;
+
+    // Standard Minecraft format '1.x.y'
+    if (major === 1) {
+      if (minor >= 21 || (minor === 20 && patch >= 5)) {
+        return 21;
+      } else if (minor >= 17) {
+        return 17;
+      } else {
+        return 8;
+      }
+    }
+
+    // Modern / snapshot / custom format where major >= 21 (e.g. '26.1.2', '24w...', '21.0')
+    if (major >= 21) {
+      return 21;
+    } else if (major >= 17) {
+      return 17;
+    } else {
+      return 8;
+    }
+  }
+
+  async resolveJavaPath(mcVersion, onProgress) {
+    let targetMajor = this.determineJavaMajor(mcVersion);
+
+    // Attempt to query Mojang version manifest for exact javaVersion if available
+    try {
+      const manifest = await this.fetchJson('https://launchermeta.mojang.com/mc/game/version_manifest_v2.json');
+      const vEntry = manifest?.versions?.find(v => v.id === mcVersion);
+      if (vEntry?.url) {
+        const vData = await this.fetchJson(vEntry.url);
+        if (vData?.javaVersion?.majorVersion) {
+          targetMajor = vData.javaVersion.majorVersion;
+        }
+      }
+    } catch (e) {}
+
+    console.log(`[MC JAVA] Target Java version for Minecraft ${mcVersion}: Java ${targetMajor}`);
+
+    // 1. Check existing isolated AntiGravity runtime
+    const isolatedJavaw = path.join(this.runtimeDir, `java-${targetMajor}`, 'bin', 'javaw.exe');
+    if (fs.existsSync(isolatedJavaw)) {
+      console.log(`[MC JAVA] Using isolated AntiGravity Java ${targetMajor}: ${isolatedJavaw}`);
+      return isolatedJavaw;
+    }
+
+    // 2. Check system runtimes that explicitly match targetMajor
+    const runtimes = this.findInstalledJavaRuntimes();
+    const exactMatch = runtimes.find(r => {
+      const nameOrPath = (r.name + ' ' + r.path).toLowerCase();
+      if (targetMajor === 21) {
+        return (nameOrPath.includes('21') || nameOrPath.includes('jdk-21') || nameOrPath.includes('jre-21')) &&
+               !nameOrPath.includes('1.8') && !nameOrPath.includes('jre8') && !nameOrPath.includes('17');
+      }
+      if (targetMajor === 17) {
+        return (nameOrPath.includes('17') || nameOrPath.includes('jdk-17') || nameOrPath.includes('jre-17')) &&
+               !nameOrPath.includes('1.8') && !nameOrPath.includes('jre8') && !nameOrPath.includes('21');
+      }
+      if (targetMajor === 8) {
+        return nameOrPath.includes('1.8') || nameOrPath.includes('jre8') || nameOrPath.includes('jdk8') || nameOrPath.includes('java-8');
+      }
+      return false;
+    });
+
+    if (exactMatch && fs.existsSync(exactMatch.path)) {
+      console.log(`[MC JAVA] Using verified system Java ${targetMajor}: ${exactMatch.path}`);
+      return exactMatch.path;
+    }
+
+    // 3. Auto-download isolated Adoptium Java runtime specifically for targetMajor
+    console.log(`[MC JAVA] Downloading isolated portable Java ${targetMajor} for AntiGravity...`);
+    const downloaded = await this.ensureJavaRuntime(targetMajor, onProgress);
+    if (downloaded && fs.existsSync(downloaded)) {
+      return downloaded;
+    }
+
+    // 4. Fallback only if download failed
+    const fallbackJavaw = runtimes.find(r => r.path.endsWith('javaw.exe'));
+    return fallbackJavaw ? fallbackJavaw.path : (runtimes[0]?.path || null);
   }
 
   async prepareLoader(loader, gameVersion, instanceDir) {
@@ -633,6 +1250,260 @@ class MinecraftService {
     return null;
   }
 
+  extractModMetadata(jarPath) {
+    const stats = fs.statSync(jarPath);
+    const cacheKey = `${jarPath}:${stats.mtimeMs}`;
+
+    if (this.modMetaCache[cacheKey]) {
+      return this.modMetaCache[cacheKey];
+    }
+
+    const baseName = path.basename(jarPath).replace(/\.disabled$/, '');
+    const meta = {
+      id: baseName.replace(/\.jar$/, ''),
+      name: baseName.replace(/\.jar$/, ''),
+      version: '',
+      description: '',
+      authors: [],
+      iconDataUri: null,
+      loader: 'unknown'
+    };
+
+    try {
+      const zip = new AdmZip(jarPath);
+
+      // Fabric / Quilt metadata
+      const fabricEntry = zip.getEntry('fabric.mod.json') || zip.getEntry('quilt.mod.json');
+      if (fabricEntry) {
+        const data = JSON.parse(zip.readAsText(fabricEntry));
+        meta.id = data.id || meta.id;
+        meta.name = data.name || meta.name;
+        meta.version = data.version || meta.version;
+        meta.description = data.description || meta.description;
+        if (Array.isArray(data.authors)) {
+          meta.authors = data.authors.map(a => typeof a === 'string' ? a : a.name);
+        } else if (typeof data.authors === 'string') {
+          meta.authors = [data.authors];
+        }
+
+        const iconPath = typeof data.icon === 'string' ? data.icon : data.icon?.['64'] || data.icon?.['128'] || data.icon?.['32'];
+        if (iconPath) {
+          const iconEntry = zip.getEntry(iconPath.replace(/^\//, ''));
+          if (iconEntry) {
+            meta.iconDataUri = `data:image/png;base64,${iconEntry.getData().toString('base64')}`;
+          }
+        }
+        meta.loader = 'fabric';
+      } else {
+        // Forge mods.toml
+        const modsToml = zip.getEntry('META-INF/mods.toml');
+        if (modsToml) {
+          const text = zip.readAsText(modsToml);
+          const modIdMatch = text.match(/modId\s*=\s*"([^"]+)"/);
+          const nameMatch = text.match(/displayName\s*=\s*"([^"]+)"/);
+          const versionMatch = text.match(/version\s*=\s*"([^"]+)"/);
+          const descMatch = text.match(/description\s*=\s*'''([^']+)'''/) || text.match(/description\s*=\s*"([^"]+)"/);
+          const authorsMatch = text.match(/authors\s*=\s*"([^"]+)"/);
+          const logoMatch = text.match(/logoFile\s*=\s*"([^"]+)"/);
+
+          if (modIdMatch) meta.id = modIdMatch[1];
+          if (nameMatch) meta.name = nameMatch[1];
+          if (versionMatch && versionMatch[1] !== '${file.jarVersion}') meta.version = versionMatch[1];
+          if (descMatch) meta.description = descMatch[1].trim();
+          if (authorsMatch) meta.authors = [authorsMatch[1]];
+          if (logoMatch) {
+            const logoEntry = zip.getEntry(logoMatch[1]) || zip.getEntry(`META-INF/${logoMatch[1]}`);
+            if (logoEntry) {
+              meta.iconDataUri = `data:image/png;base64,${logoEntry.getData().toString('base64')}`;
+            }
+          }
+          meta.loader = 'forge';
+        } else {
+          // Legacy mcmod.info
+          const mcmodInfo = zip.getEntry('mcmod.info');
+          if (mcmodInfo) {
+            try {
+              const data = JSON.parse(zip.readAsText(mcmodInfo));
+              const m = Array.isArray(data) ? data[0] : data?.modList?.[0] || data;
+              if (m) {
+                meta.id = m.modid || meta.id;
+                meta.name = m.name || meta.name;
+                meta.version = m.version || meta.version;
+                meta.description = m.description || meta.description;
+                meta.authors = m.authorList || [];
+                meta.loader = 'forge';
+              }
+            } catch (e) {}
+          }
+        }
+      }
+    } catch (e) {}
+
+    this.modMetaCache[cacheKey] = meta;
+    this.saveModMetaCache();
+    return meta;
+  }
+
+  getInstalledMods(instanceId) {
+    const instDir = this.getInstanceDir(instanceId);
+    const modsDir = path.join(instDir, 'mods');
+    if (!fs.existsSync(modsDir)) return [];
+
+    const files = fs.readdirSync(modsDir);
+    return files
+      .filter(f => f.endsWith('.jar') || f.endsWith('.jar.disabled') || f.endsWith('.zip') || f.endsWith('.mrpack'))
+      .map(file => {
+        const fullPath = path.join(modsDir, file);
+        const stats = fs.statSync(fullPath);
+        const isEnabled = !file.endsWith('.disabled');
+        const cleanName = file.replace(/\.disabled$/, '');
+        const meta = this.extractModMetadata(fullPath);
+
+        return {
+          filename: file,
+          cleanName,
+          name: meta.name || cleanName,
+          id: meta.id,
+          version: meta.version || '',
+          description: meta.description || '',
+          authors: meta.authors || [],
+          iconDataUri: meta.iconDataUri,
+          loader: meta.loader || 'unknown',
+          enabled: isEnabled,
+          size: (stats.size / 1024).toFixed(1) + ' KB',
+          sizeBytes: stats.size,
+          lastModified: stats.mtime
+        };
+      });
+  }
+
+  toggleMod(filename, enable, instanceId) {
+    const instDir = this.getInstanceDir(instanceId);
+    const modsDir = path.join(instDir, 'mods');
+    const currentPath = path.join(modsDir, filename);
+    if (!fs.existsSync(currentPath)) return { success: false, error: 'File not found' };
+
+    let targetFilename;
+    if (enable && filename.endsWith('.disabled')) {
+      targetFilename = filename.replace(/\.disabled$/, '');
+    } else if (!enable && !filename.endsWith('.disabled')) {
+      targetFilename = filename + '.disabled';
+    } else {
+      return { success: true, filename };
+    }
+
+    const targetPath = path.join(modsDir, targetFilename);
+    fs.renameSync(currentPath, targetPath);
+    return { success: true, filename: targetFilename, enabled: enable };
+  }
+
+  toggleAllMods(enable, instanceId) {
+    const instDir = this.getInstanceDir(instanceId);
+    const modsDir = path.join(instDir, 'mods');
+    if (!fs.existsSync(modsDir)) return { success: true };
+
+    const files = fs.readdirSync(modsDir);
+    files.forEach(file => {
+      this.toggleMod(file, enable, instanceId);
+    });
+
+    return { success: true };
+  }
+
+  deleteMod(filename, instanceId) {
+    const instDir = this.getInstanceDir(instanceId);
+    const filePath = path.join(instDir, 'mods', filename);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      return { success: true };
+    }
+    return { success: false, error: 'File not found' };
+  }
+
+  installLocalJars(filePaths, instanceId) {
+    const instDir = this.getInstanceDir(instanceId);
+    const targetDir = path.join(instDir, 'mods');
+    if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+
+    let count = 0;
+    (filePaths || []).forEach(src => {
+      if (fs.existsSync(src) && (src.endsWith('.jar') || src.endsWith('.zip'))) {
+        const dest = path.join(targetDir, path.basename(src));
+        fs.copyFileSync(src, dest);
+        count++;
+      }
+    });
+
+    return { success: true, count };
+  }
+
+  async checkModUpdates(instanceId) {
+    const mods = this.getInstalledMods(instanceId);
+    const hashes = {};
+
+    mods.forEach(m => {
+      const instDir = this.getInstanceDir(instanceId);
+      const p = path.join(instDir, 'mods', m.filename);
+      if (fs.existsSync(p)) {
+        const buf = fs.readFileSync(p);
+        const sha1 = crypto.createHash('sha1').update(buf).digest('hex');
+        const sha512 = crypto.createHash('sha512').update(buf).digest('hex');
+        hashes[sha1] = { mod: m, sha512 };
+      }
+    });
+
+    const sha1List = Object.keys(hashes);
+    if (sha1List.length === 0) return { updates: [] };
+
+    try {
+      const res = await this.requestJson('https://api.modrinth.com/v2/version_files', {
+        method: 'POST',
+        body: { hashes: sha1List, algorithm: 'sha1' }
+      });
+
+      const updates = [];
+      if (res.status === 200 && res.data) {
+        for (const [h, versionData] of Object.entries(res.data)) {
+          const modItem = hashes[h]?.mod;
+          if (modItem && versionData?.project_id) {
+            updates.push({
+              filename: modItem.filename,
+              name: modItem.name,
+              currentVersion: versionData.version_number,
+              projectId: versionData.project_id
+            });
+          }
+        }
+      }
+
+      return { success: true, updates };
+    } catch (e) {
+      console.warn('Mod update check failed:', e.message);
+      return { success: false, updates: [] };
+    }
+  }
+
+  async uploadLogToMclogs(logText) {
+    try {
+      const postData = 'content=' + encodeURIComponent(logText || 'Empty log.');
+      const res = await this.requestJson('https://api.mclo.gs/1/log', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Length': Buffer.byteLength(postData)
+        },
+        body: postData
+      });
+
+      if (res.status === 200 && res.data?.url) {
+        return { success: true, url: res.data.url, raw: res.data.raw };
+      }
+      return { success: false, error: 'Could not upload log to mclo.gs' };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
+
   async searchModrinth({ query = '', projectType = 'mod', loader = '', version = '', limit = 18, offset = 0, index = 'relevance' }) {
     const facets = [];
     if (projectType && projectType !== 'all') {
@@ -648,6 +1519,11 @@ class MinecraftService {
     const facetsQuery = facets.length ? `&facets=[${facets.join(',')}]` : '';
     const url = `https://api.modrinth.com/v2/search?query=${encodeURIComponent(query)}&limit=${limit}&offset=${offset}&index=${index}${facetsQuery}`;
 
+    return await this.fetchJson(url);
+  }
+
+  async getModrinthProject(projectId) {
+    const url = `https://api.modrinth.com/v2/project/${encodeURIComponent(projectId)}`;
     return await this.fetchJson(url);
   }
 
@@ -667,7 +1543,6 @@ class MinecraftService {
 
     try {
       let fallbackUrl = `https://api.modrinth.com/v2/project/${encodeURIComponent(projectId)}/version`;
-      if (version) fallbackUrl += `?game_versions=["${version}"]`;
       return await this.fetchJson(fallbackUrl);
     } catch (err) {
       console.error('Failed to get versions:', err);
@@ -686,7 +1561,7 @@ class MinecraftService {
         const client = parsed.protocol === 'https:' ? https : http;
 
         client.get(currentUrl, {
-          headers: { 'User-Agent': 'AntiGravity-Launcher' }
+          headers: { 'User-Agent': 'AntiGravity-Launcher/7.5.0' }
         }, (res) => {
           if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
             const nextUrl = new URL(res.headers.location, currentUrl).href;
@@ -738,7 +1613,7 @@ class MinecraftService {
     return { success: true, destPath, fileName };
   }
 
-  async installModpack(mrpackUrl, modpackName, onProgress) {
+  async installModpack(mrpackUrl, modpackName, onProgress, targetInstanceId) {
     const tempDir = path.join(this.mcDir, 'temp');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
@@ -763,17 +1638,25 @@ class MinecraftService {
       else if (indexData.dependencies?.['neoforge']) loader = 'neoforge';
       else if (indexData.dependencies?.['quilt-loader']) loader = 'quilt';
 
-      const finalName = indexData.name || modpackName || 'Modpack Instance';
-      const createRes = this.createInstance({
-        name: finalName,
-        version: gameVersion,
-        loader,
-        ramMin: 2,
-        ramMax: 6,
-        icon: 'box-open'
-      });
+      let instance;
+      if (targetInstanceId) {
+        const instances = this.getInstancesData().instances;
+        instance = instances.find(i => i.id === targetInstanceId);
+      }
 
-      const instance = createRes.instance;
+      if (!instance) {
+        const finalName = indexData.name || modpackName || 'Modpack Instance';
+        const createRes = this.createInstance({
+          name: finalName,
+          version: gameVersion,
+          loader,
+          ramMin: 2,
+          ramMax: 6,
+          icon: 'box-open'
+        });
+        instance = createRes.instance;
+      }
+
       const instanceDir = this.getInstanceDir(instance.id);
 
       // Extract overrides
@@ -819,61 +1702,6 @@ class MinecraftService {
     }
   }
 
-  getInstalledMods(instanceId) {
-    const instDir = this.getInstanceDir(instanceId);
-    const modsDir = path.join(instDir, 'mods');
-    if (!fs.existsSync(modsDir)) return [];
-
-    const files = fs.readdirSync(modsDir);
-    return files
-      .filter(f => f.endsWith('.jar') || f.endsWith('.jar.disabled') || f.endsWith('.zip') || f.endsWith('.mrpack'))
-      .map(file => {
-        const fullPath = path.join(modsDir, file);
-        const stats = fs.statSync(fullPath);
-        const isEnabled = !file.endsWith('.disabled');
-        const cleanName = file.replace(/\.disabled$/, '');
-
-        return {
-          filename: file,
-          cleanName,
-          enabled: isEnabled,
-          size: (stats.size / 1024).toFixed(1) + ' KB',
-          sizeBytes: stats.size,
-          lastModified: stats.mtime
-        };
-      });
-  }
-
-  toggleMod(filename, enable, instanceId) {
-    const instDir = this.getInstanceDir(instanceId);
-    const modsDir = path.join(instDir, 'mods');
-    const currentPath = path.join(modsDir, filename);
-    if (!fs.existsSync(currentPath)) return { success: false, error: 'File not found' };
-
-    let targetFilename;
-    if (enable && filename.endsWith('.disabled')) {
-      targetFilename = filename.replace(/\.disabled$/, '');
-    } else if (!enable && !filename.endsWith('.disabled')) {
-      targetFilename = filename + '.disabled';
-    } else {
-      return { success: true, filename };
-    }
-
-    const targetPath = path.join(modsDir, targetFilename);
-    fs.renameSync(currentPath, targetPath);
-    return { success: true, filename: targetFilename, enabled: enable };
-  }
-
-  deleteMod(filename, instanceId) {
-    const instDir = this.getInstanceDir(instanceId);
-    const filePath = path.join(instDir, 'mods', filename);
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-      return { success: true };
-    }
-    return { success: false, error: 'File not found' };
-  }
-
   async getVersions() {
     try {
       const manifest = await this.fetchJson('https://launchermeta.mojang.com/mc/game/version_manifest_v2.json');
@@ -907,14 +1735,31 @@ class MinecraftService {
     ];
   }
 
+  async ensureAuthlibInjector() {
+    const jarPath = path.join(this.runtimeDir, 'authlib-injector.jar');
+    if (fs.existsSync(jarPath) && fs.statSync(jarPath).size > 100000) {
+      return jarPath;
+    }
+
+    const downloadUrl = 'https://github.com/yushijinhun/authlib-injector/releases/download/v1.2.8/authlib-injector-1.2.8.jar';
+    console.log(`[MC SKIN] Downloading authlib-injector agent from: ${downloadUrl}`);
+    try {
+      await this.downloadFileWithRedirects(downloadUrl, jarPath);
+      return jarPath;
+    } catch (e) {
+      console.warn('[MC SKIN] Could not download authlib-injector:', e.message);
+      return null;
+    }
+  }
+
   async launchGame({ instanceId, version, loader, ramMin, ramMax, customJavaPath }, onProgress, onLog, onClose) {
     try {
       const { Client } = require('minecraft-launcher-core');
       const launcher = new Client();
       let profile = this.getProfile();
 
-      if (!profile || !profile.token) {
-        profile = this.setOfflineProfile('Player').profile;
+      if (!profile || !profile.token || !profile.token.access_token) {
+        profile = this.setOfflineProfile(profile?.gamertag || 'Player').profile;
       }
 
       const activeInst = this.getActiveInstance();
@@ -923,9 +1768,58 @@ class MinecraftService {
       const instLoader = loader || activeInst.loader || 'fabric';
       const instRamMin = ramMin || activeInst.ramMin || 2;
       const instRamMax = ramMax || activeInst.ramMax || 4;
+      const customJava = customJavaPath || activeInst.customJavaPath;
+      const customJvm = activeInst.jvmArgs ? activeInst.jvmArgs.split(' ').filter(Boolean) : [];
 
       const instanceDir = this.getInstanceDir(instId);
-      const resolvedJava = customJavaPath || this.resolveJavaPath(instVersion);
+
+      if (profile.isOffline) {
+        const cleanName = profile.gamertag || 'Player';
+        const offlineUuid = this.generateOfflineUuid(cleanName);
+        profile.token = {
+          access_token: offlineUuid,
+          client_token: offlineUuid,
+          uuid: offlineUuid,
+          name: cleanName,
+          user_properties: '{}'
+        };
+
+        // 1. Inject local resource pack & CustomSkinLoader
+        await this.injectOfflineSkinPack(instanceDir, profile);
+
+        // 2. Start local Yggdrasil skin server and attach authlib-injector
+        try {
+          const skinFile = profile.rawSkinUrl && fs.existsSync(profile.rawSkinUrl)
+            ? profile.rawSkinUrl
+            : path.join(this.skinsDir, `skin_${cleanName}.png`);
+
+          let skinBuffer = null;
+          if (fs.existsSync(skinFile)) {
+            skinBuffer = fs.readFileSync(skinFile);
+          } else if (profile.skinDataUri && profile.skinDataUri.startsWith('data:image/png;base64,')) {
+            skinBuffer = Buffer.from(profile.skinDataUri.replace(/^data:image\/png;base64,/, ''), 'base64');
+          }
+
+          if (skinBuffer) {
+            await this.skinServer.start();
+            this.skinServer.setSkin(profile, skinBuffer);
+
+            const authlibJar = await this.ensureAuthlibInjector();
+            if (authlibJar && fs.existsSync(authlibJar)) {
+              const agentArg = `-javaagent:${authlibJar}=http://127.0.0.1:${this.skinServer.port}`;
+              if (!customJvm.some(arg => arg.includes('authlib-injector'))) {
+                customJvm.push(agentArg);
+                console.log(`[MC SKIN] Attached authlib-injector javaagent: ${agentArg}`);
+              }
+            }
+          }
+        } catch (skinErr) {
+          console.warn('[MC SKIN] Could not setup local skin server:', skinErr.message);
+        }
+      }
+
+      if (onProgress) onProgress({ type: 'java', task: 'Checking & resolving Java runtime...', percent: 5 });
+      const resolvedJava = (customJava && fs.existsSync(customJava)) ? customJava : await this.resolveJavaPath(instVersion, onProgress);
 
       const launchOpts = {
         clientPackage: null,
@@ -942,8 +1836,27 @@ class MinecraftService {
         memory: {
           max: `${instRamMax}G`,
           min: `${instRamMin}G`
-        }
+        },
+        customArgs: customJvm
       };
+
+      // Game window resolution
+      if (activeInst.windowWidth || activeInst.windowHeight || activeInst.fullscreen) {
+        launchOpts.window = {
+          width: activeInst.windowWidth || 1280,
+          height: activeInst.windowHeight || 720,
+          fullscreen: Boolean(activeInst.fullscreen)
+        };
+      }
+
+      // Server auto-connect
+      if (activeInst.serverAddress && activeInst.serverAddress.trim()) {
+        const sParts = activeInst.serverAddress.trim().split(':');
+        launchOpts.server = {
+          host: sParts[0],
+          port: sParts[1] ? parseInt(sParts[1], 10) : 25565
+        };
+      }
 
       if (resolvedJava && fs.existsSync(resolvedJava)) {
         launchOpts.javaPath = resolvedJava;
@@ -973,7 +1886,9 @@ class MinecraftService {
         memory: launchOpts.memory,
         user: profile.gamertag,
         isOffline: profile.isOffline,
-        java: launchOpts.javaPath
+        java: launchOpts.javaPath,
+        window: launchOpts.window,
+        server: launchOpts.server
       });
 
       launcher.on('debug', (e) => {
