@@ -1,26 +1,28 @@
-# 🚀 Antigravity
+# Antigravity
 
-Antigravity is a modern Electron-based game launcher designed to organize, download, and launch games from a single application. It features a clean interface, built-in download support, and a customizable library system.
+Antigravity is a modern Electron-based game launcher and Minecraft management platform designed to organize, download, and launch PC games and Minecraft installations from a single unified application. It features a clean interface, built-in download and extraction engine, console-style Big Picture mode, and a complete Minecraft instance ecosystem.
 
-> **⚠️ This project is currently under development. Features and functionality may change over time.**
+> **Note: This project is currently under active development. Features and functionality may evolve over time.**
 
 ---
 
 # Features
 
-- 🎮 Modern game launcher
-- 📥 Built-in download manager
-- 📚 Game library management
-- ⚡ Fast and lightweight interface
-- 🖥️ Cross-platform Electron application
-- 🔄 Automatic updates (planned)
-- 🎨 Clean and responsive UI
+### Core Game Launcher
+- Modern and responsive dark-mode interface
+- Ultra Big Picture Mode designed for TV and gamepad navigation with dynamic ambient glow
+- Built-in download manager with real-time progress and speed statistics
+- Native archive extraction supporting 7z, ZIP, and RAR formats with password decryption
+- Integrated secure in-app browser with ad blocking and tracker protection
+- In-place automatic updater powered by GitHub Releases
 
----
-
-# Screenshots
-
-Coming soon.
+### Minecraft Hub
+- Multi-Instance Management: Create and manage isolated Minecraft installations with customizable versions, mod loaders (Fabric, Forge, NeoForge, Quilt, Vanilla), RAM allocation, and JVM arguments
+- Modrinth Integration: Search, browse, and install mods, resource packs, and shaders directly inside the launcher
+- 1-Click Modpack Support: Full compatibility with `.mrpack` modpacks including automated dependency resolution
+- Multi-Account Manager: 1-click profile switching between Microsoft accounts and offline profiles
+- Offline Skin Station: Custom skin injection for offline profiles with local authentication support and Java Agent runtime interception
+- Crash and Log Diagnostics: Live console output with 1-click log sharing to mclo.gs
 
 ---
 
@@ -30,6 +32,7 @@ Before building Antigravity, make sure you have installed:
 
 - Node.js 18 or newer
 - npm (comes with Node.js)
+- Java Runtime Environment (JRE/JDK 8, 17, or 21 depending on Minecraft versions played)
 - Git
 
 ---
@@ -51,7 +54,7 @@ npm install
 
 ---
 
-# Running the launcher
+# Running the Launcher
 
 Start the application in development mode:
 
@@ -59,26 +62,14 @@ Start the application in development mode:
 npm start
 ```
 
-If your project uses another start script, run:
-
-```bash
-npm run dev
-```
-
 ---
 
 # Building
 
-Build the application:
+Build the executable package for Windows:
 
 ```bash
 npm run build
-```
-
-If you're using Electron Builder:
-
-```bash
-npm run dist
 ```
 
 The compiled application will be generated in the `dist/` folder.
@@ -89,51 +80,45 @@ The compiled application will be generated in the `dist/` folder.
 
 ```
 Antigravity/
-│
-├── main.js
-├── preload.js
-├── renderer.js
-├── index.html
-├── styles.css
-├── config.json
-├── package.json
-├── package-lock.json
-├── README.md
-│
-├── assets/
-│
-└── node_modules/
+├── main.js                 # Electron main process, lifecycle, IPC handlers, downloads & updater
+├── preload.js              # Secure IPC bridge exposing system APIs to renderer
+├── renderer.js             # UI logic, state management, Big Picture controller & sound engine
+├── minecraft-service.js    # Minecraft instance management, Modrinth API, auth & skin injection
+├── index.html              # Core application layout and modal dialogs
+├── styles.css              # Custom styling, animations, and Big Picture design system
+├── package.json            # Project dependencies, build scripts, and metadata
+└── assets/                 # Icons, sound effects, and default branding assets
 ```
 
 ---
 
-# Disclaimer
+# Disclaimers
 
-By downloading, installing, or using this launcher, you acknowledge and agree to the following terms:
-
+### General Disclaimer
 This launcher is provided solely as a software management and game launching tool. It does **not** include, distribute, host, promote, or facilitate access to unauthorized, pirated, or illegally obtained software or game content.
 
 Users are solely responsible for ensuring that they own the necessary licenses, rights, and permissions to access and use any games or software launched through this application. The developer does not verify the legality or ownership of any third-party software used with this launcher.
 
 The developer shall not be held liable for any misuse of this launcher, including, but not limited to, the use of unauthorized, modified, or illegally obtained software. Any violation of applicable laws, software licenses, or third-party terms of service is the sole responsibility of the user.
 
-By using this launcher, you agree to comply with all applicable laws, regulations, and license agreements governing the software you access through it.
+### Minecraft and Mojang Disclaimer
+**NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.**
+
+"Minecraft" is a registered trademark of Mojang Synergies AB. Antigravity is an independent third-party launcher and is in no way affiliated with, endorsed by, sponsored by, or associated with Mojang Studios, Microsoft Corporation, or any of their subsidiaries or affiliates.
 
 ---
 
 # Contributing
 
-Pull requests are welcome.
+Pull requests and contributions are welcome.
 
-If you find a bug or have a feature request, please open an Issue.
+If you encounter a bug or have a feature suggestion, please open an Issue on GitHub.
 
 ---
 
 # License
 
-This project is licensed under the MIT License.
-
-See the `LICENSE` file for more information.
+This project is licensed under the MIT License. See the `LICENSE` file for more details.
 
 ---
 
@@ -141,9 +126,4 @@ See the `LICENSE` file for more information.
 
 Developed by **MaxMuestar**
 
-GitHub:
-https://github.com/maxmuestar
-
----
-
-⭐ If you like this project, consider giving it a star!
+GitHub: https://github.com/maxmuestar
