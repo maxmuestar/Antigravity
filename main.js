@@ -7,8 +7,10 @@ const AdmZip = require('adm-zip');
 const { createExtractorFromFile } = require('node-unrar-js');
 const { ElectronBlocker } = require('@ghostery/adblocker-electron');
 const MinecraftService = require('./minecraft-service');
+const GameScanner = require('./game-scanner');
 
 let minecraftService = null;
+let gameScanner = null;
 
 const GITHUB_REPO_OWNER = 'maxmuestar';
 const GITHUB_REPO_NAME = 'Antigravity';
@@ -616,10 +618,12 @@ function initPaths() {
   writeStorageInfo();
 
   minecraftService = new MinecraftService(userDataDir);
+  gameScanner = new GameScanner(coversDir);
 
   console.log('[STORAGE] App root:', appRootDir);
   console.log('[STORAGE] Data folder:', userDataDir);
   console.log('[MINECRAFT] Folder:', minecraftService.mcDir);
+  console.log('[SCANNER] Ready with coversDir:', coversDir);
 }
 
 function getFilesRecursively(dir, filesList = []) {
@@ -1676,6 +1680,99 @@ ipcMain.handle('get-storage-info', () => ({
   configPath: normalizePathForStorage(configPath)
 }));
 
+function isProcessRunning(exeName) {
+  try {
+    const { execSync } = require('child_process');
+    const out = execSync(`tasklist /FI "IMAGENAME eq ${exeName}" /NH`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] });
+    return out.toLowerCase().includes(exeName.toLowerCase());
+  } catch (e) {
+    return false;
+  }
+}
+
+const LAUNCHER_DEFINITIONS = {
+  steam: {
+    platform: 'steam',
+    platformName: 'Steam',
+    icon: 'fa-brands fa-steam',
+    processes: ['steam.exe'],
+    protocol: 'steam://open/main',
+    paths: [
+      'C:\\Program Files (x86)\\Steam\\steam.exe',
+      'C:\\Program Files\\Steam\\steam.exe'
+    ]
+  },
+  ea: {
+    platform: 'ea',
+    platformName: 'EA App',
+    icon: 'fa-solid fa-gamepad',
+    processes: ['EADesktop.exe', 'Origin.exe', 'EABackgroundService.exe'],
+    protocol: 'origin2://',
+    paths: [
+      'C:\\Program Files\\Electronic Arts\\EA Desktop\\EA Desktop\\EADesktop.exe',
+      'C:\\Program Files (x86)\\Electronic Arts\\EA Desktop\\EA Desktop\\EADesktop.exe',
+      'C:\\Program Files (x86)\\Origin\\Origin.exe',
+      'C:\\Program Files\\Origin\\Origin.exe'
+    ]
+  },
+  epic: {
+    platform: 'epic',
+    platformName: 'Epic Games',
+    icon: 'fa-solid fa-bolt',
+    processes: ['EpicGamesLauncher.exe'],
+    protocol: 'com.epicgames.launcher://',
+    paths: [
+      'C:\\Program Files (x86)\\Epic Games\\Launcher\\Portal\\Binaries\\Win64\\EpicGamesLauncher.exe',
+      'C:\\Program Files\\Epic Games\\Launcher\\Portal\\Binaries\\Win64\\EpicGamesLauncher.exe'
+    ]
+  },
+  gog: {
+    platform: 'gog',
+    platformName: 'GOG Galaxy',
+    icon: 'fa-solid fa-compact-disc',
+    processes: ['GalaxyClient.exe'],
+    protocol: 'goggalaxy://',
+    paths: [
+      'C:\\Program Files (x86)\\GOG Galaxy\\GalaxyClient.exe',
+      'C:\\Program Files\\GOG Galaxy\\GalaxyClient.exe'
+    ]
+  },
+  ubisoft: {
+    platform: 'ubisoft',
+    platformName: 'Ubisoft Connect',
+    icon: 'fa-solid fa-shapes',
+    processes: ['upc.exe', 'UbisoftConnect.exe', 'Uplay.exe'],
+    protocol: 'uplay://',
+    paths: [
+      'C:\\Program Files (x86)\\Ubisoft\\Ubisoft Game Launcher\\UbisoftConnect.exe',
+      'C:\\Program Files\\Ubisoft\\Ubisoft Game Launcher\\UbisoftConnect.exe',
+      'C:\\Program Files (x86)\\Ubisoft\\Ubisoft Game Launcher\\Uplay.exe'
+    ]
+  }
+};
+
+function openExternalLauncher(platformKey) {
+  const def = LAUNCHER_DEFINITIONS[platformKey] || LAUNCHER_DEFINITIONS.steam;
+  if (!def) return { success: false, error: 'Unknown platform' };
+
+  // 1. Try launching through direct executable
+  const existingExe = (def.paths || []).find(p => fs.existsSync(p));
+  if (existingExe) {
+    try {
+      spawn(existingExe, [], { detached: true, stdio: 'ignore' }).unref();
+      return { success: true };
+    } catch (e) {}
+  }
+
+  // 2. Fallback to protocol URI
+  if (def.protocol) {
+    shell.openExternal(def.protocol).catch(() => {});
+    return { success: true };
+  }
+
+  return { success: false, error: 'Could not launch platform executable' };
+}
+
 ipcMain.handle('get-game-launch-status', (event, gameId) => {
   try {
     const { game, error } = getGameById(gameId);
@@ -1686,10 +1783,32 @@ ipcMain.handle('get-game-launch-status', (event, gameId) => {
       return { success: false, error: `Startup file not found: ${fullExePath}` };
     }
 
+    // Identify target launcher platform
+    let platform = 'steam';
+    const src = (game.source || '').toLowerCase();
+    if (src === 'ea' || game.id?.startsWith('ea-')) platform = 'ea';
+    else if (src === 'epic' || game.id?.startsWith('epic-')) platform = 'epic';
+    else if (src === 'gog' || game.id?.startsWith('gog-')) platform = 'gog';
+    else if (src === 'ubisoft' || game.id?.startsWith('ubi-')) platform = 'ubisoft';
+    else if (src === 'steam' || game.id?.startsWith('steam-')) platform = 'steam';
+
+    const def = LAUNCHER_DEFINITIONS[platform] || LAUNCHER_DEFINITIONS.steam;
+    let isRunning = false;
+    for (const proc of def.processes) {
+      if (isProcessRunning(proc)) {
+        isRunning = true;
+        break;
+      }
+    }
+
     return {
       success: true,
       gameTitle: game.title,
-      steamRunning: isProcessRunning('steam.exe')
+      platform: def.platform,
+      platformName: def.platformName,
+      icon: def.icon,
+      isLauncherRunning: isRunning,
+      steamRunning: isRunning // backward compatibility
     };
   } catch (err) {
     console.error('Failed to get launch status:', err);
@@ -1697,14 +1816,12 @@ ipcMain.handle('get-game-launch-status', (event, gameId) => {
   }
 });
 
+ipcMain.handle('open-external-launcher', async (event, platformKey) => {
+  return openExternalLauncher(platformKey);
+});
+
 ipcMain.handle('open-steam', async () => {
-  try {
-    await shell.openExternal('steam://open/main');
-    return { success: true };
-  } catch (err) {
-    console.error('Failed to open Steam:', err);
-    return { success: false, error: err.message };
-  }
+  return openExternalLauncher('steam');
 });
 
 ipcMain.handle('open-windows-security', async () => {
@@ -2419,5 +2536,26 @@ ipcMain.handle('mc-launch-game', async (event, launchConfig) => {
       mainWindow?.webContents.send('mc-closed', { exitCode });
     }
   );
+});
+
+// External Launcher Scanner & Importer Handlers
+ipcMain.handle('scan-launcher-games', async () => {
+  if (!gameScanner) gameScanner = new GameScanner(coversDir);
+  const existingLibrary = readLibrary();
+  return gameScanner.scanAll(existingLibrary);
+});
+
+ipcMain.handle('import-launcher-games', async (event, selectedGames) => {
+  if (!gameScanner) gameScanner = new GameScanner(coversDir);
+  if (!Array.isArray(selectedGames) || selectedGames.length === 0) {
+    return { success: false, count: 0, games: [] };
+  }
+  const result = await gameScanner.importGames(selectedGames, libraryPath, async (title) => {
+    return await findAndSaveCover(Date.now().toString(), title, '', '');
+  });
+  if (mainWindow) {
+    mainWindow.webContents.send('library-updated');
+  }
+  return result;
 });
 

@@ -18,4 +18,6 @@ out/
 build/
 
 .vscode/
+*.zip
+
 .idea/

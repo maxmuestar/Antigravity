@@ -84,7 +84,7 @@
       <div class="sidebar-version-footer">
         <div class="version-label">
           <i class="fa-solid fa-code-branch"></i>
-          <span id="app-version-label">v7.5.0</span>
+          <span id="app-version-label">v7.5.5</span>
         </div>
         <button class="check-update-btn" id="btn-check-update" title="Check for Updates on GitHub">
           <i class="fa-solid fa-arrows-rotate" id="check-update-icon"></i>
@@ -104,6 +104,9 @@
             <p class="subtitle">Launch, manage, and play your downloaded games.</p>
           </div>
           <div class="view-header-actions">
+            <button class="secondary-btn btn-sm" id="btn-open-import-modal" title="Import installed games from Steam, Epic, EA, GOG">
+              <i class="fa-solid fa-file-import"></i> Import Games
+            </button>
             <button class="secondary-btn btn-sm" id="btn-open-games-folder">
               <i class="fa-solid fa-folder-open"></i> Games Folder
             </button>
@@ -725,24 +728,37 @@
       </div>
     </div>
 
-    <!-- Modal: Steam Warning -->
+    <!-- Modal: Launcher Helper & Auto-Starter -->
     <div class="modal-content" id="modal-steam-warning">
       <div class="modal-header">
         <div class="modal-title-with-icon text-warning">
-          <i class="fa-brands fa-steam"></i>
-          <h2>Steam is not open</h2>
+          <i class="fa-brands fa-steam" id="launcher-warning-icon"></i>
+          <h2 id="launcher-warning-heading">Steam is niet gestart</h2>
         </div>
-        <button class="modal-close-btn" onclick="closeActiveModal()"><i class="fa-solid fa-xmark"></i></button>
+        <button class="modal-close-btn" onclick="closeActiveModal()" title="Close"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div class="modal-body">
-        <p><strong id="steam-warning-game-title">This game</strong> might not work correctly while Steam is closed.</p>
-        <p>Open Steam first, or continue launching the game anyway.</p>
-        <p class="controller-hint">Controller: A = Steam openen, B = Toch doorgaan</p>
+        <p><strong id="steam-warning-game-title">Deze game</strong> vereist mogelijk dat <span id="launcher-warning-platform-name">Steam</span> actief is voor cloudopslag of multiplayer.</p>
+        <p id="launcher-warning-desc">Start het platform nu en wacht tot het geïnitialiseerd is, of open de game direct.</p>
+
+        <!-- Auto-Launch Countdown Card -->
+        <div class="launcher-countdown-card" id="launcher-countdown-card" style="display: none;">
+          <div class="launcher-countdown-spinner">
+            <i class="fa-solid fa-arrows-rotate spin-icon"></i>
+          </div>
+          <div class="launcher-countdown-info">
+            <div class="launcher-countdown-title"><span id="launcher-countdown-platform">Steam</span> wordt gestart...</div>
+            <div class="launcher-countdown-text">De game start automatisch over <strong id="launcher-countdown-seconds">10</strong> seconden...</div>
+            <div class="launcher-countdown-bar-bg">
+              <div class="launcher-countdown-bar-fill" id="launcher-countdown-bar-fill"></div>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="modal-footer">
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
         <button class="secondary-btn" id="modal-btn-launch-anyway">Toch doorgaan</button>
         <button class="primary-btn" id="modal-btn-open-steam">
-          <i class="fa-brands fa-steam"></i> Steam openen
+          <i class="fa-brands fa-steam" id="launcher-btn-icon"></i> <span id="launcher-btn-text">Steam starten</span>
         </button>
       </div>
     </div>
@@ -788,9 +804,9 @@
       <div class="modal-body">
         <div class="update-banner">
           <div class="update-version-row">
-            <span class="update-badge-old" id="update-current-ver">v7.5.0</span>
+            <span class="update-badge-old" id="update-current-ver">v7.5.5</span>
             <i class="fa-solid fa-arrow-right update-arrow"></i>
-            <span class="update-badge-new" id="update-new-ver">v7.5.0</span>
+            <span class="update-badge-new" id="update-new-ver">v7.5.5</span>
           </div>
           <h3 class="update-release-title" id="update-release-title">AntiGravity</h3>
         </div>
@@ -1129,6 +1145,68 @@
           </button>
         </div>
         <button type="button" class="secondary-btn" onclick="closeActiveModal()">Close</button>
+      </div>
+    </div>
+
+    <!-- Modal: Import Games from External Launchers -->
+    <div class="modal-content modal-wide modal-import-dialog" id="modal-import-games">
+      <div class="modal-header">
+        <div class="modal-title-with-icon text-accent">
+          <i class="fa-solid fa-file-import"></i>
+          <h2>Import Installed Games</h2>
+        </div>
+        <button class="modal-close-btn" onclick="closeActiveModal()" title="Close"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body" style="padding-bottom: 0.5rem;">
+        <p class="modal-description" style="color: var(--text-secondary); margin-bottom: 0.85rem;">
+          Automatically detect and import installed games from Steam, EA App, Epic Games, GOG, and Ubisoft directly into your AntiGravity library.
+        </p>
+
+        <!-- Filter & Search Controls -->
+        <div class="import-controls-row">
+          <div class="import-platform-tabs">
+            <button type="button" class="import-tab active" data-platform="all">All (<span id="import-count-all">0</span>)</button>
+            <button type="button" class="import-tab" data-platform="steam"><i class="fa-brands fa-steam"></i> Steam (<span id="import-count-steam">0</span>)</button>
+            <button type="button" class="import-tab" data-platform="ea"><i class="fa-solid fa-gamepad"></i> EA App (<span id="import-count-ea">0</span>)</button>
+            <button type="button" class="import-tab" data-platform="epic"><i class="fa-solid fa-bolt"></i> Epic (<span id="import-count-epic">0</span>)</button>
+            <button type="button" class="import-tab" data-platform="gog"><i class="fa-solid fa-compact-disc"></i> GOG (<span id="import-count-gog">0</span>)</button>
+            <button type="button" class="import-tab" data-platform="ubisoft"><i class="fa-solid fa-shapes"></i> Ubisoft (<span id="import-count-ubisoft">0</span>)</button>
+          </div>
+
+          <div class="import-search-box">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="text" id="import-search-input" placeholder="Filter detected games..." autocomplete="off">
+          </div>
+        </div>
+
+        <div class="import-selection-bar">
+          <div class="import-select-actions">
+            <button type="button" class="btn-link" id="import-btn-select-all"><i class="fa-solid fa-check-double"></i> Select All</button>
+            <span>•</span>
+            <button type="button" class="btn-link" id="import-btn-deselect-all">Deselect All</button>
+          </div>
+          <div class="import-selected-count-badge">
+            <span id="import-selected-count">0</span> games selected
+          </div>
+        </div>
+
+        <!-- Games List / Grid -->
+        <div class="import-games-container" id="import-games-container">
+          <div class="import-games-list" id="import-games-list">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+        <button type="button" class="secondary-btn btn-sm" id="import-btn-rescan" title="Scan again for newly installed games">
+          <i class="fa-solid fa-arrows-rotate" id="import-rescan-icon"></i> Rescan Launchers
+        </button>
+        <div style="display: flex; gap: 0.75rem;">
+          <button type="button" class="secondary-btn" onclick="closeActiveModal()">Cancel</button>
+          <button type="button" class="primary-btn btn-success" id="import-btn-confirm" disabled>
+            <i class="fa-solid fa-download"></i> <span id="import-btn-confirm-text">Import Selected Games</span>
+          </button>
+        </div>
       </div>
     </div>
 

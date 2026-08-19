@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('api', {
   runGame: (gameId) => ipcRenderer.invoke('run-game', gameId),
   getGameLaunchStatus: (gameId) => ipcRenderer.invoke('get-game-launch-status', gameId),
   openSteam: () => ipcRenderer.invoke('open-steam'),
+  openExternalLauncher: (platform) => ipcRenderer.invoke('open-external-launcher', platform),
   openWindowsSecurity: () => ipcRenderer.invoke('open-windows-security'),
   openGameFolder: (gameId) => ipcRenderer.invoke('open-game-folder', gameId),
   openStorageFolder: (folderName) => ipcRenderer.invoke('open-storage-folder', folderName),
@@ -23,6 +24,8 @@ contextBridge.exposeInMainWorld('api', {
   getStorageStats: () => ipcRenderer.invoke('get-storage-stats'),
   selectCoverImage: () => ipcRenderer.invoke('select-cover-image'),
   selectManualExe: () => ipcRenderer.invoke('select-manual-exe'),
+  scanLauncherGames: () => ipcRenderer.invoke('scan-launcher-games'),
+  importLauncherGames: (games) => ipcRenderer.invoke('import-launcher-games', games),
   
   // Downloads & ZIP
   onDownloadProgress: (callback) => {

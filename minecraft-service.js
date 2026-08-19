@@ -32,7 +32,7 @@ class LocalSkinServer {
             meta: {
               serverName: "AntiGravity Offline Skin Station",
               implementationName: "antigravity-skin-station",
-              version: "7.5.0"
+              version: "7.5.5"
             },
             skinDomains: ["127.0.0.1", "localhost", "minotar.net", "mc-heads.net"]
           }));
@@ -343,7 +343,7 @@ class MinecraftService {
 
       const headers = {
         'Accept': 'application/json',
-        'User-Agent': 'AntiGravity-Launcher/7.5.0',
+        'User-Agent': 'AntiGravity-Launcher/7.5.5',
         ...(options.headers || {})
       };
 
@@ -377,7 +377,7 @@ class MinecraftService {
 
   fetchJson(url) {
     return new Promise((resolve, reject) => {
-      https.get(url, { headers: { 'User-Agent': 'AntiGravity-Launcher/7.5.0' } }, (res) => {
+      https.get(url, { headers: { 'User-Agent': 'AntiGravity-Launcher/7.5.5' } }, (res) => {
         let data = '';
         res.on('data', chunk => data += chunk);
         res.on('end', () => {
@@ -1561,7 +1561,7 @@ class MinecraftService {
         const client = parsed.protocol === 'https:' ? https : http;
 
         client.get(currentUrl, {
-          headers: { 'User-Agent': 'AntiGravity-Launcher/7.5.0' }
+          headers: { 'User-Agent': 'AntiGravity-Launcher/7.5.5' }
         }, (res) => {
           if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
             const nextUrl = new URL(res.headers.location, currentUrl).href;

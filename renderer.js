@@ -435,23 +435,29 @@ function switchTab(tabId) {
 }
 
 function setupLibraryActions() {
-  document.getElementById('btn-open-games-folder').addEventListener('click', async () => {
+  document.getElementById('btn-open-import-modal')?.addEventListener('click', () => {
+    openImportGamesModal();
+  });
+
+  document.getElementById('btn-open-games-folder')?.addEventListener('click', async () => {
     const res = await window.api.openStorageFolder('games');
     if (!res.success) {
       alert(`Could not open games folder: ${res.error}`);
     }
   });
 
-  document.getElementById('btn-open-downloads-folder').addEventListener('click', async () => {
+  document.getElementById('btn-open-downloads-folder')?.addEventListener('click', async () => {
     const res = await window.api.openStorageFolder('downloads');
     if (!res.success) {
       alert(`Could not open downloads folder: ${res.error}`);
     }
   });
 
-  document.getElementById('btn-big-picture').addEventListener('click', () => {
+  document.getElementById('btn-big-picture')?.addEventListener('click', () => {
     openBigPicture();
   });
+
+  setupImportGamesListeners();
 }
 
 function setupBigPictureControls() {
@@ -523,24 +529,95 @@ async function showAntivirusReminder() {
   showModal(modalAntivirusReminder);
 }
 
-async function openSteamAndContinuePendingLaunch() {
-  const gameId = appState.pendingLaunchGameId;
-  if (!gameId) return;
+let launcherCountdownInterval = null;
+let currentLauncherStatus = null;
 
-  const steamResult = await window.api.openSteam();
-  if (!steamResult.success) {
-    alert(`Could not open Steam: ${steamResult.error}`);
-    return;
+function clearLauncherCountdown() {
+  if (launcherCountdownInterval) {
+    clearInterval(launcherCountdownInterval);
+    launcherCountdownInterval = null;
+  }
+}
+
+function openLauncherHelperModal(status) {
+  currentLauncherStatus = status;
+  clearLauncherCountdown();
+
+  const titleEl = document.getElementById('steam-warning-game-title');
+  const headingEl = document.getElementById('launcher-warning-heading');
+  const iconEl = document.getElementById('launcher-warning-icon');
+  const platformNameEl = document.getElementById('launcher-warning-platform-name');
+  const btnIconEl = document.getElementById('launcher-btn-icon');
+  const btnTextEl = document.getElementById('launcher-btn-text');
+  const countdownCard = document.getElementById('launcher-countdown-card');
+  const startBtn = document.getElementById('modal-btn-open-steam');
+
+  if (titleEl) titleEl.innerText = status.gameTitle || 'Deze game';
+  if (headingEl) headingEl.innerText = `${status.platformName || 'Launcher'} is niet gestart`;
+  if (iconEl) iconEl.className = status.icon || 'fa-solid fa-gamepad';
+  if (platformNameEl) platformNameEl.innerText = status.platformName || 'de launcher';
+  if (btnIconEl) btnIconEl.className = status.icon || 'fa-solid fa-play';
+  if (btnTextEl) btnTextEl.innerText = `${status.platformName || 'Launcher'} starten`;
+
+  if (countdownCard) countdownCard.style.display = 'none';
+  if (startBtn) {
+    startBtn.disabled = false;
+    startBtn.style.display = 'inline-flex';
   }
 
-  closeActiveModal();
-  setTimeout(() => launchGame(gameId), 2500);
+  showModal(modalSteamWarning);
+}
+
+async function startLauncherWith10SecondCountdown() {
+  const gameId = appState.pendingLaunchGameId;
+  const platform = currentLauncherStatus?.platform || 'steam';
+  const platformName = currentLauncherStatus?.platformName || 'Launcher';
+  if (!gameId) return;
+
+  clearLauncherCountdown();
+
+  // 1. Trigger launcher startup
+  sfx.play('launch');
+  const res = await window.api.openExternalLauncher(platform);
+  if (!res?.success) {
+    showToast('Kon launcher niet starten', res?.error || 'Controleer of de launcher geïnstalleerd is.', 'error');
+  }
+
+  // 2. Setup 10-second countdown UI
+  const countdownCard = document.getElementById('launcher-countdown-card');
+  const countdownPlatform = document.getElementById('launcher-countdown-platform');
+  const secondsEl = document.getElementById('launcher-countdown-seconds');
+  const barFill = document.getElementById('launcher-countdown-bar-fill');
+  const startBtn = document.getElementById('modal-btn-open-steam');
+
+  if (countdownCard) countdownCard.style.display = 'flex';
+  if (countdownPlatform) countdownPlatform.innerText = platformName;
+  if (startBtn) startBtn.style.display = 'none';
+
+  let remainingSeconds = 10;
+  if (secondsEl) secondsEl.innerText = remainingSeconds;
+  if (barFill) barFill.style.width = '0%';
+
+  launcherCountdownInterval = setInterval(async () => {
+    remainingSeconds--;
+    if (secondsEl) secondsEl.innerText = remainingSeconds;
+    if (barFill) barFill.style.width = `${((10 - remainingSeconds) / 10) * 100}%`;
+
+    if (remainingSeconds <= 0) {
+      clearLauncherCountdown();
+      closeActiveModal();
+      sfx.play('complete');
+      showToast('Game wordt gestart', `Launcher is geïnitialiseerd. Veel plezier met spelen!`, 'success', 3000);
+      await launchGame(gameId);
+    }
+  }, 1000);
 }
 
 async function continuePendingLaunchAnyway() {
   const gameId = appState.pendingLaunchGameId;
   if (!gameId) return;
 
+  clearLauncherCountdown();
   closeActiveModal();
   await launchGame(gameId);
 }
@@ -903,6 +980,7 @@ function showModal(modalElement) {
 }
 
 function closeActiveModal() {
+  clearLauncherCountdown();
   if (modalOverlay) modalOverlay.classList.remove('active');
   document.querySelectorAll('.modal-content').forEach(m => m.classList.remove('active'));
   appState.pendingSelectionGameId = null;
@@ -1041,7 +1119,7 @@ function setupModalActions() {
     }
   });
 
-  document.getElementById('modal-btn-open-steam').addEventListener('click', openSteamAndContinuePendingLaunch);
+  document.getElementById('modal-btn-open-steam').addEventListener('click', startLauncherWith10SecondCountdown);
   document.getElementById('modal-btn-launch-anyway').addEventListener('click', continuePendingLaunchAnyway);
 
   document.getElementById('modal-btn-open-data-folder').addEventListener('click', async () => {
@@ -1412,10 +1490,10 @@ async function launchGameWithSteamCheck(gameId) {
     return;
   }
 
-  if (!status.steamRunning) {
+  // If the game requires a launcher (Steam, EA, Epic, GOG, Ubisoft) that is not open
+  if (!status.isLauncherRunning && status.platform) {
     appState.pendingLaunchGameId = gameId;
-    document.getElementById('steam-warning-game-title').innerText = status.gameTitle || 'This game';
-    showModal(modalSteamWarning);
+    openLauncherHelperModal(status);
     return;
   }
 
@@ -1639,7 +1717,14 @@ function renderBigPicture() {
 
     const coverUrl = getCoverUrl(game);
     const favBadge = game.favorite ? `<div class="bp-card-fav-star"><i class="fa-solid fa-star"></i></div>` : '';
-    const tag = game.isMinecraft ? `${game.loader || 'Java'} ${game.version || ''}`.trim() : 'Game';
+    let tag = 'Game';
+    if (game.isMinecraft) {
+      tag = `${game.loader || 'Java'} ${game.version || ''}`.trim();
+    } else if (game.platformName) {
+      tag = game.platformName;
+    } else if (game.source && game.source !== 'local') {
+      tag = game.source.toUpperCase();
+    }
 
     card.innerHTML = coverUrl
       ? `<img src="${escapeHtml(coverUrl)}" alt="${escapeHtml(game.title)}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
@@ -1703,7 +1788,17 @@ function renderBigPictureSelection() {
   const lastPlayedStr = formatLastPlayed(game.lastPlayed);
   if (heroTitle) heroTitle.innerText = game.title;
   if (heroSubtitle) heroSubtitle.innerText = `${game.exePath ? game.exePath.split('/').pop() : 'Direct Launch'} • ${playtimeStr} • ${lastPlayedStr}`;
-  if (heroBadge) heroBadge.innerText = game.isMinecraft ? '⛏️ MINECRAFT EDITION' : (game.favorite ? '⭐ FAVORITE GAME' : 'READY TO PLAY');
+  if (heroBadge) {
+    if (game.isMinecraft) {
+      heroBadge.innerText = 'MINECRAFT EDITION';
+    } else if (game.platformName) {
+      heroBadge.innerText = `${game.platformName.toUpperCase()} GAME`;
+    } else if (game.favorite) {
+      heroBadge.innerText = 'FAVORITE GAME';
+    } else {
+      heroBadge.innerText = 'READY TO PLAY';
+    }
+  }
   if (favLabel) favLabel.innerText = game.favorite ? 'Favorited' : 'Favorite';
 
   // Dynamic ambient glowing color
@@ -1939,6 +2034,25 @@ function renderLibrary() {
       coverHtml = `<img src="${escapeHtml(formattedCover)}" class="game-cover" alt="${safeTitle}">`;
     }
     
+    // Source origin formatting
+    let sourceBadgeHtml = '';
+    const src = (game.source || '').toLowerCase();
+    if (src === 'steam' || game.platformName === 'Steam' || game.id?.startsWith('steam-')) {
+      sourceBadgeHtml = `<span class="game-source-tag steam" title="Imported from Steam"><i class="fa-brands fa-steam"></i> Steam</span>`;
+    } else if (src === 'ea' || game.platformName === 'EA App' || game.id?.startsWith('ea-')) {
+      sourceBadgeHtml = `<span class="game-source-tag ea" title="Imported from EA App"><i class="fa-solid fa-gamepad"></i> EA App</span>`;
+    } else if (src === 'epic' || game.platformName === 'Epic Games' || game.id?.startsWith('epic-')) {
+      sourceBadgeHtml = `<span class="game-source-tag epic" title="Imported from Epic Games"><i class="fa-solid fa-bolt"></i> Epic</span>`;
+    } else if (src === 'gog' || game.platformName === 'GOG Galaxy' || game.id?.startsWith('gog-')) {
+      sourceBadgeHtml = `<span class="game-source-tag gog" title="Imported from GOG Galaxy"><i class="fa-solid fa-compact-disc"></i> GOG</span>`;
+    } else if (src === 'ubisoft' || game.platformName === 'Ubisoft' || game.id?.startsWith('ubi-')) {
+      sourceBadgeHtml = `<span class="game-source-tag ubisoft" title="Imported from Ubisoft Connect"><i class="fa-solid fa-shapes"></i> Ubisoft</span>`;
+    } else if (game.isMinecraft || game.id?.startsWith('minecraft-')) {
+      sourceBadgeHtml = `<span class="game-source-tag minecraft" title="Minecraft Installation"><i class="fa-solid fa-cube"></i> Minecraft</span>`;
+    } else {
+      sourceBadgeHtml = `<span class="game-source-tag local" title="AntiGravity Game"><i class="fa-solid fa-hard-drive"></i> Local</span>`;
+    }
+
     card.innerHTML = `
       <div class="game-cover-container">
         ${coverHtml}
@@ -1968,7 +2082,7 @@ function renderLibrary() {
           <div class="game-exe-label" title="${safeExePath}">${safeExePath}</div>
           <div class="game-card-meta-row">
             <span><i class="fa-solid fa-calendar-day"></i> ${escapeHtml(lastPlayedText)}</span>
-            <span><i class="fa-brands fa-steam"></i> Steam check</span>
+            ${sourceBadgeHtml}
           </div>
         </div>
         <div class="action-buttons-row">
@@ -3705,5 +3819,290 @@ async function launchMinecraft() {
     showToast('Launch Failed', res.error || 'Could not launch Minecraft.', 'error', 5000);
   }
 }
+
+// ========================================================
+// External Game Importer (Steam, Epic, EA, GOG, Ubisoft)
+// ========================================================
+let importScanData = {
+  games: [],
+  selectedIds: new Set(),
+  activePlatform: 'all',
+  searchTerm: '',
+  isScanning: false,
+  isImporting: false
+};
+
+const modalImportGames = document.getElementById('modal-import-games');
+
+function openImportGamesModal() {
+  sfx.play('click');
+  showModal(modalImportGames);
+  scanExternalGames();
+}
+
+async function scanExternalGames(force = false) {
+  if (importScanData.isScanning) return;
+  importScanData.isScanning = true;
+
+  const rescanBtn = document.getElementById('import-btn-rescan');
+  const rescanIcon = document.getElementById('import-rescan-icon');
+  const listEl = document.getElementById('import-games-list');
+
+  if (rescanIcon) rescanIcon.classList.add('spin-icon');
+  if (rescanBtn) rescanBtn.disabled = true;
+
+  if (listEl) {
+    listEl.innerHTML = `
+      <div class="import-empty-state">
+        <i class="fa-solid fa-arrows-rotate spin-icon text-accent"></i>
+        <div style="font-weight: 800; color: #fff; font-size: 1rem;">Scanning External Launchers...</div>
+        <div style="font-size: 0.8rem; color: var(--text-secondary);">Detecting games from Steam, EA App, Epic Games, GOG Galaxy & Ubisoft Connect...</div>
+      </div>
+    `;
+  }
+
+  try {
+    const detectedGames = await window.api.scanLauncherGames();
+    importScanData.games = detectedGames || [];
+    
+    // Default select all games that are NOT yet imported
+    importScanData.selectedIds.clear();
+    importScanData.games.forEach(g => {
+      if (!g.alreadyImported) {
+        importScanData.selectedIds.add(g.id);
+      }
+    });
+
+    updateImportCounts();
+    renderImportGamesList();
+  } catch (err) {
+    console.error('Scan failed:', err);
+    if (listEl) {
+      listEl.innerHTML = `
+        <div class="import-empty-state">
+          <i class="fa-solid fa-triangle-exclamation text-warning"></i>
+          <div style="font-weight: 800; color: #fff;">Scan Failed</div>
+          <div style="font-size: 0.8rem;">Could not scan external game libraries: ${escapeHtml(err.message || err)}</div>
+        </div>
+      `;
+    }
+  } finally {
+    importScanData.isScanning = false;
+    if (rescanIcon) rescanIcon.classList.remove('spin-icon');
+    if (rescanBtn) rescanBtn.disabled = false;
+  }
+}
+
+function updateImportCounts() {
+  const games = importScanData.games;
+  const setEl = (id, count) => {
+    const el = document.getElementById(id);
+    if (el) el.innerText = count;
+  };
+
+  setEl('import-count-all', games.length);
+  setEl('import-count-steam', games.filter(g => g.source === 'steam').length);
+  setEl('import-count-ea', games.filter(g => g.source === 'ea').length);
+  setEl('import-count-epic', games.filter(g => g.source === 'epic').length);
+  setEl('import-count-gog', games.filter(g => g.source === 'gog').length);
+  setEl('import-count-ubisoft', games.filter(g => g.source === 'ubisoft').length);
+
+  const selectedCountEl = document.getElementById('import-selected-count');
+  if (selectedCountEl) selectedCountEl.innerText = importScanData.selectedIds.size;
+
+  const confirmBtn = document.getElementById('import-btn-confirm');
+  const confirmText = document.getElementById('import-btn-confirm-text');
+  if (confirmBtn) {
+    confirmBtn.disabled = importScanData.selectedIds.size === 0 || importScanData.isImporting;
+  }
+  if (confirmText) {
+    confirmText.innerText = importScanData.selectedIds.size > 0
+      ? `Import Selected Games (${importScanData.selectedIds.size})`
+      : 'Import Selected Games';
+  }
+}
+
+function getFilteredImportGames() {
+  let list = importScanData.games;
+  if (importScanData.activePlatform !== 'all') {
+    list = list.filter(g => g.source === importScanData.activePlatform);
+  }
+  if (importScanData.searchTerm.trim()) {
+    const q = importScanData.searchTerm.toLowerCase().trim();
+    list = list.filter(g => (g.title || '').toLowerCase().includes(q) || (g.installPath || '').toLowerCase().includes(q));
+  }
+  return list;
+}
+
+function renderImportGamesList() {
+  const listEl = document.getElementById('import-games-list');
+  if (!listEl) return;
+
+  const games = getFilteredImportGames();
+  listEl.innerHTML = '';
+
+  if (games.length === 0) {
+    listEl.innerHTML = `
+      <div class="import-empty-state">
+        <i class="fa-solid fa-gamepad"></i>
+        <div style="font-weight: 800; color: #fff;">No Games Found</div>
+        <div style="font-size: 0.8rem;">No installed games match the selected platform or search filter.</div>
+      </div>
+    `;
+    return;
+  }
+
+  games.forEach(game => {
+    const isSelected = importScanData.selectedIds.has(game.id);
+    const card = document.createElement('div');
+    card.className = `import-game-card ${isSelected ? 'selected' : ''} ${game.alreadyImported ? 'already-imported' : ''}`;
+    card.dataset.gameId = game.id;
+
+    let iconPlatform = 'fa-solid fa-gamepad';
+    if (game.source === 'steam') iconPlatform = 'fa-brands fa-steam';
+    else if (game.source === 'ea') iconPlatform = 'fa-solid fa-gamepad';
+    else if (game.source === 'epic') iconPlatform = 'fa-solid fa-bolt';
+    else if (game.source === 'gog') iconPlatform = 'fa-solid fa-compact-disc';
+    else if (game.source === 'ubisoft') iconPlatform = 'fa-solid fa-shapes';
+
+    const coverHtml = game.coverUrl
+      ? `<img src="${escapeHtml(game.coverUrl)}" alt="${escapeHtml(game.title)}" onerror="this.style.display='none'; if (this.nextElementSibling) this.nextElementSibling.style.display='block';"><i class="fa-solid fa-image fallback-icon" style="display:none;"></i>`
+      : `<i class="fa-solid fa-image fallback-icon"></i>`;
+
+    card.innerHTML = `
+      <div class="import-checkbox-wrap">
+        <input type="checkbox" class="import-checkbox" ${isSelected ? 'checked' : ''} data-id="${game.id}">
+      </div>
+      <div class="import-cover-thumb">
+        ${coverHtml}
+      </div>
+      <div class="import-info-col">
+        <div class="import-game-title" title="${escapeHtml(game.title)}">${escapeHtml(game.title)}</div>
+        <div class="import-game-path" title="${escapeHtml(game.installPath)}">${escapeHtml(game.installPath)}</div>
+      </div>
+      <div class="import-meta-col">
+        <span class="import-platform-badge ${game.source}">
+          <i class="${iconPlatform}"></i> ${escapeHtml(game.platformName || game.source)}
+        </span>
+        ${game.alreadyImported
+          ? `<span class="import-status-tag imported"><i class="fa-solid fa-check"></i> In Library</span>`
+          : `<span class="import-status-tag ready">Ready</span>`
+        }
+      </div>
+    `;
+
+    card.addEventListener('click', (e) => {
+      if (e.target.tagName !== 'INPUT') {
+        const chk = card.querySelector('.import-checkbox');
+        if (chk) chk.checked = !chk.checked;
+      }
+      toggleImportGameSelect(game.id);
+    });
+
+    listEl.appendChild(card);
+  });
+}
+
+function toggleImportGameSelect(gameId) {
+  sfx.play('hover');
+  if (importScanData.selectedIds.has(gameId)) {
+    importScanData.selectedIds.delete(gameId);
+  } else {
+    importScanData.selectedIds.add(gameId);
+  }
+  updateImportCounts();
+  renderImportGamesList();
+}
+
+function toggleImportSelectAll(selectAll = true) {
+  sfx.play('click');
+  const visible = getFilteredImportGames();
+  if (selectAll) {
+    visible.forEach(g => importScanData.selectedIds.add(g.id));
+  } else {
+    visible.forEach(g => importScanData.selectedIds.delete(g.id));
+  }
+  updateImportCounts();
+  renderImportGamesList();
+}
+
+async function executeImportGames() {
+  if (importScanData.isImporting || importScanData.selectedIds.size === 0) return;
+  importScanData.isImporting = true;
+
+  const confirmBtn = document.getElementById('import-btn-confirm');
+  const confirmText = document.getElementById('import-btn-confirm-text');
+  if (confirmBtn) confirmBtn.disabled = true;
+  if (confirmText) confirmText.innerHTML = '<i class="fa-solid fa-arrows-rotate spin-icon"></i> Importing...';
+
+  const selectedGames = importScanData.games.filter(g => importScanData.selectedIds.has(g.id));
+
+  try {
+    sfx.play('launch');
+    showToast('Importing Games', `Importing ${selectedGames.length} games and downloading artwork...`, 'info', 4000);
+
+    const result = await window.api.importLauncherGames(selectedGames);
+
+    if (result && result.success) {
+      sfx.play('complete');
+      closeActiveModal();
+      showToast('Games Imported', `Successfully added ${result.count} games to your library!`, 'success', 5000);
+      loadLibrary();
+      updateStorageWidget();
+    } else {
+      showToast('Import Failed', result?.error || 'Could not complete game import.', 'error', 5000);
+    }
+  } catch (err) {
+    console.error('Import execution error:', err);
+    showToast('Import Error', err.message || 'An error occurred during import.', 'error', 5000);
+  } finally {
+    importScanData.isImporting = false;
+    if (confirmBtn) confirmBtn.disabled = false;
+    if (confirmText) confirmText.innerText = 'Import Selected Games';
+  }
+}
+
+function setupImportGamesListeners() {
+  // Platform filter tab buttons
+  document.querySelectorAll('.import-tab').forEach(tab => {
+    tab.addEventListener('click', (e) => {
+      sfx.play('click');
+      document.querySelectorAll('.import-tab').forEach(t => t.classList.remove('active'));
+      e.currentTarget.classList.add('active');
+      importScanData.activePlatform = e.currentTarget.dataset.platform || 'all';
+      renderImportGamesList();
+    });
+  });
+
+  // Live search input
+  const searchInput = document.getElementById('import-search-input');
+  if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+      importScanData.searchTerm = e.target.value;
+      renderImportGamesList();
+    });
+  }
+
+  // Select all / deselect all
+  document.getElementById('import-btn-select-all')?.addEventListener('click', () => {
+    toggleImportSelectAll(true);
+  });
+
+  document.getElementById('import-btn-deselect-all')?.addEventListener('click', () => {
+    toggleImportSelectAll(false);
+  });
+
+  // Rescan button
+  document.getElementById('import-btn-rescan')?.addEventListener('click', () => {
+    sfx.play('click');
+    scanExternalGames(true);
+  });
+
+  // Confirm import button
+  document.getElementById('import-btn-confirm')?.addEventListener('click', () => {
+    executeImportGames();
+  });
+}
+
 
 
